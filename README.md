@@ -2,6 +2,22 @@
 
 Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 
+- 서비스: https://ieum-portal.vercel.app
+- Supabase 프로젝트: `ieum-portal` (ref `kcgiddadxjbjoimfzfwr`, Seoul)
+- GitHub: https://github.com/shawnny25/ieum-portal (main 에 push 하면 Vercel 자동 배포)
+
+## 0. 현재 상태 (2026-09-12 자동 구축 결과)
+
+완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필(sionlee0825@gmail.com), Vercel 배포, 공개 env 2개.
+남은 것은 아래 두 가지뿐.
+
+1. **비밀번호 설정** — 초대 메일이 sionlee0825@gmail.com 으로 발송됨. 만료됐으면 https://ieum-portal.vercel.app/login 에서 이메일 입력 후 "비밀번호 재설정" 클릭.
+2. **SUPABASE_SERVICE_ROLE_KEY 등록** — 계정 발급 메뉴에 필요. Supabase → Project Settings → API Keys → Secret keys → default 의 값을 복사해서:
+   ```bash
+   npx vercel env add SUPABASE_SERVICE_ROLE_KEY production
+   ```
+   (붙여넣고 Enter) 그리고 `.env.local` 의 같은 줄에도 붙여넣기. 그 뒤 `npx vercel --prod`.
+
 ## 1. Supabase 설정 (한 번만)
 
 1. https://supabase.com/dashboard → **New project** (리전: Northeast Asia (Seoul))
