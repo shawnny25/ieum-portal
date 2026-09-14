@@ -8,21 +8,18 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 
 ## 0. 현재 상태 (2026-09-14)
 
-완료: Supabase 프로젝트·스키마, 관리자 프로필, Vercel 배포, 서비스 키, 자동 정지 방지 + 일일 백업 크론, Cloudflare R2 파일 저장소(10GB, 파일당 200MB, 업로드·다운로드 검증 완료), 권한 모델 E2E 검증 통과.
+**전부 완료.** Supabase 프로젝트·스키마, 관리자 프로필, Vercel 배포, 서비스 키, 자동 정지 방지 + 일일 백업 크론, Cloudflare R2 파일 저장소(10GB, 200MB/파일), 메일 발송(Gmail SMTP, 앱 비밀번호), Supabase 인증 메일도 같은 SMTP, 권한 모델 E2E 검증 통과.
 
-남은 것 하나 — **메일 발송 비밀번호**. 발신 계정 sionlee@ngokcoc.or.kr 은 메일플러그(Mailplug) 서비스라 호스트 `smtp.mailplug.co.kr`, 포트 `465` 로 이미 등록되어 있다.
+### 메일 발신 계정
 
-1. 메일플러그 웹메일 → 우측 상단 프로필 → 설정(톱니바퀴) → **로그인 보안 설정 → 앱 비밀번호 → 생성하기**. 생성된 비밀번호를 복사 (계정 비밀번호가 아님).
-   같은 설정에서 **메일 → POP3/IMAP 사용** 도 켜 둘 것 (외부 연동 전제 조건). 메뉴가 안 보이면 그룹웨어 관리자가 POP3/IMAP 을 허용해야 한다.
-2. 앱 비밀번호를 등록:
+현재 sionlee0825@gmail.com (테스트용). 기관 메일(메일플러그)은 관리자가 POP3/IMAP 외부 연동을 허용해야 SMTP 가 열린다.
+발신 계정을 바꿀 때:
+1. `.env.local` 의 `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` 수정 후 `node --env-file=.env.local scripts/mail-test.mjs` 로 확인
+2. Vercel 에 같은 네 개 `npx vercel env rm` → `npx vercel env add` (production/preview/development), `npx vercel --prod`
+3. `supabase/config.toml` 의 host/user/admin_email 수정 후
    ```bash
-   npx vercel env add SMTP_PASS production
+   SMTP_PASS=(앱 비밀번호) npx supabase config push --project-ref kcgiddadxjbjoimfzfwr
    ```
-3. Supabase → Authentication → Emails → SMTP Settings 에도 같은 값 (Host `smtp.mailplug.co.kr`, Port `465`, User·Sender 는 메일 주소). 이걸 넣어야 비밀번호 재설정 메일이 시간당 2통 제한에서 풀린다.
-4. `npx vercel --prod`
-
-없으면: Zoom 안내 메일은 "발송 실패"로 남고 재시도 버튼으로 나중에 보낼 수 있다. 나머지는 전부 동작.
-발신 계정을 팀 메일로 바꿀 때는 `SMTP_USER`, `MAIL_FROM`, `SMTP_PASS` 세 개만 교체.
 
 ### 백업
 

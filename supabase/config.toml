@@ -1,0 +1,12 @@
+# Supabase 원격 설정 중 CLI 로 관리하는 항목만 선언 (선언 안 한 항목은 건드리지 않음).
+# 적용: SMTP_PASS 환경변수를 넣고  npx supabase config push --project-ref kcgiddadxjbjoimfzfwr
+project_id = "ieum-portal"
+
+[auth.email.smtp]
+enabled = true
+host = "smtp.gmail.com"
+port = 465
+user = "sionlee0825@gmail.com"
+pass = "env(SMTP_PASS)"
+admin_email = "sionlee0825@gmail.com"
+sender_name = "이음 포털"
