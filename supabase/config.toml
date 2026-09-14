@@ -10,3 +10,6 @@ user = "sionlee0825@gmail.com"
 pass = "env(SMTP_PASS)"
 admin_email = "sionlee0825@gmail.com"
 sender_name = "이음 포털"
+
+[auth.rate_limit]
+email_sent = 30   # 시간당 인증 메일 상한 (기본 2통은 자체 SMTP 없을 때 기준)
