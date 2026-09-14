@@ -11,9 +11,20 @@ export default function Login() {
   const [msg, setMsg] = useState(""); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const fromLink = /type=(invite|recovery|magiclink)/.test(window.location.hash);
-    const { data } = sb.auth.onAuthStateChange((_ev, session) => { if (session && fromLink) setMode("setpw"); });
-    return () => data.subscription.unsubscribe();
+    const h = new URLSearchParams(window.location.hash.slice(1)), q = new URLSearchParams(window.location.search);
+    const clean = () => window.history.replaceState(null, "", window.location.pathname);
+    if (h.get("error_description")) { setErr("링크가 만료되었거나 이미 사용되었습니다. 비밀번호 재설정을 다시 요청해 주세요."); clean(); return; }
+    // 대시보드·서버에서 보낸 링크(#access_token…): PKCE 클라이언트가 자동 처리하지 않으므로 직접 세션 설정
+    if (h.get("access_token") && h.get("refresh_token")) {
+      sb.auth.setSession({ access_token: h.get("access_token"), refresh_token: h.get("refresh_token") })
+        .then(({ error }) => { if (error) setErr(`링크 처리 실패: ${error.message}`); else setMode("setpw"); clean(); });
+      return;
+    }
+    // 이 화면에서 요청한 재설정 링크(?code=…): 클라이언트가 자동 교환 → 세션 생기면 비밀번호 설정으로
+    if (q.has("code")) {
+      const { data } = sb.auth.onAuthStateChange((_ev, session) => { if (session) { setMode("setpw"); clean(); } });
+      return () => data.subscription.unsubscribe();
+    }
   }, []);
 
   const login = async (e) => {
