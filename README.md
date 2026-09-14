@@ -6,50 +6,41 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 - Supabase 프로젝트: `ieum-portal` (ref `kcgiddadxjbjoimfzfwr`, Seoul)
 - GitHub: https://github.com/shawnny25/ieum-portal (main 에 push 하면 Vercel 자동 배포)
 
-## 0. 한 달 무료 테스트 준비 (2026-09-14)
+## 0. 현재 상태 (2026-09-14)
 
-완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필, Vercel 배포, 자동 정지 방지 크론(매일 0시), Gmail 메일 발송 경로, R2 저장소 경로, 주간 백업 워크플로.
-직접 해야 하는 것 세 가지. 전부 명령 한 줄에 값 붙여넣기.
+완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필, Vercel 배포, 서비스 키 등록, 자동 정지 방지 + 일일 백업 크론, 권한 모델 E2E 검증(`scripts/e2e-check.mjs` 통과).
 
-1. **서비스 키** — 계정 발급 메뉴에 필요. Supabase → Project Settings → API Keys → Secret keys → default 값 복사 후:
-   ```bash
-   npx vercel env add SUPABASE_SERVICE_ROLE_KEY production
-   ```
-2. **메일 발송용 Gmail** — 팀 Gmail 계정에서 [앱 비밀번호](https://myaccount.google.com/apppasswords) 발급(2단계 인증 필요) 후:
+남은 것 (비밀값이라 직접):
+
+1. **메일 발송용 Gmail** — 팀 Gmail 계정에서 [앱 비밀번호](https://myaccount.google.com/apppasswords) 발급(2단계 인증 필요) 후:
    ```bash
    npx vercel env add GMAIL_USER production
    ```
    ```bash
    npx vercel env add GMAIL_APP_PASSWORD production
    ```
-3. **Supabase 인증 메일도 같은 Gmail 로** — 무료 기본 발송은 시간당 2통이라 비밀번호 재설정이 몰리면 막힌다.
-   Supabase → Authentication → Emails → SMTP Settings → Enable Custom SMTP:
-   Host `smtp.gmail.com`, Port `465`, User = Gmail 주소, Password = 앱 비밀번호, Sender = Gmail 주소.
-
-세 개 넣은 뒤 `npx vercel --prod` 한 번. `.env.local` 에도 같은 값을 넣으면 로컬에서도 동작.
-
-### 파일 저장소를 R2 로 (무료 10GB, 파일당 200MB)
-
-키가 없으면 Supabase 저장소(1GB, 50MB)로 동작한다. 넣으면 그때부터 올리는 파일은 R2 로 간다.
-
-1. https://dash.cloudflare.com → R2 Object Storage → **Manage R2 API Tokens → Create API token**
-   권한 "Object Read & Write", 만료 없음. 생성 후 화면의 **Access Key ID / Secret Access Key** 와, R2 개요 화면 우측의 **Account ID** 를 복사.
-2. `.env.local` 의 `R2_*` 네 줄에 붙여넣고 `NEXT_PUBLIC_R2=1` 추가.
-3. 버킷 생성 + 브라우저 업로드 허용(CORS) 한 번:
+   그리고 Supabase → Authentication → Emails → SMTP Settings 에도 같은 값 (Host `smtp.gmail.com`, Port `465`).
+   없으면: Zoom 안내 메일은 "발송 실패"로 남고, 비밀번호 재설정 메일은 시간당 2통 제한.
+2. **R2 (선택)** — Cloudflare 이메일 확인 후 R2 → Manage API Tokens → Create (Object Read & Write). Access Key ID / Secret 을 `.env.local` 의 `R2_*` 에 넣고 `NEXT_PUBLIC_R2=1`, 그 다음:
    ```bash
    node --env-file=.env.local scripts/r2-cors.mjs
    ```
-4. Vercel 에도 같은 다섯 개 등록 (`npx vercel env add R2_ACCOUNT_ID production` 식으로 반복) 후 `npx vercel --prod`.
+   Vercel 에도 같은 다섯 개 등록 후 `npx vercel --prod`. 안 넣으면 Supabase 저장소(1GB, 50MB)로 동작.
 
-### 주간 DB 백업 (GitHub Actions, 무료)
+### 백업
 
-매주 월요일 새벽 3시에 DB 전체를 덤프해 GitHub 아티팩트로 90일 보관. `.github/workflows/backup.yml`.
+매일 0시 `/api/cron` 이 DB 전체와 계정 목록을 JSON 으로 덤프해 스토리지 `backups` 버킷에 저장하고 60일 지난 것을 지운다.
+복원: Supabase → Storage → backups 에서 파일명 확인 후
+```bash
+node --env-file=.env.local scripts/restore.mjs ieum-2026-09-14.json
+```
 
-1. Supabase → 상단 **Connect** → Direct connection 문자열 복사 (비밀번호는 프로젝트 생성 때 것. 잊었으면 Project Settings → Database → Reset database password)
-2. https://github.com/shawnny25/ieum-portal/settings/secrets/actions → **New repository secret** → 이름 `SUPABASE_DB_URL`, 값은 위 문자열
-3. Actions 탭 → weekly-db-backup → **Run workflow** 로 한 번 돌려서 아티팩트가 생기는지 확인
+### 검증
 
-복원은 SQL Editor 에 덤프 파일 내용을 붙여넣으면 된다. R2 파일 자체는 백업하지 않는다(R2 는 자체 내구성 보장, 실수 삭제 방지는 버킷의 삭제 권한을 관리자만 갖는 것으로 대체).
+권한 격리(기관은 자기 데이터만, 만료 기관 차단, 스토리지 폴더 격리)는 임시 계정으로 실제 호출해 확인한다. 실행 후 임시 데이터는 자동 삭제.
+```bash
+node --env-file=.env.local scripts/e2e-check.mjs
+```
 
 ## 1. Supabase 설정 (한 번만)
 
