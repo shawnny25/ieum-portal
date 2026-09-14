@@ -8,22 +8,20 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 
 ## 0. 현재 상태 (2026-09-14)
 
-완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필, Vercel 배포, 서비스 키 등록, 자동 정지 방지 + 일일 백업 크론, 권한 모델 E2E 검증(`scripts/e2e-check.mjs` 통과).
+완료: Supabase 프로젝트·스키마, 관리자 프로필, Vercel 배포, 서비스 키, 자동 정지 방지 + 일일 백업 크론, Cloudflare R2 파일 저장소(10GB, 파일당 200MB, 업로드·다운로드 검증 완료), 권한 모델 E2E 검증 통과.
 
-남은 것 (비밀값이라 직접):
+남은 것 하나 — **메일 발송 비밀번호**. 발신 계정 sionlee@ngokcoc.or.kr 은 메일플러그(Mailplug) 서비스라 호스트 `smtp.mailplug.co.kr`, 포트 `465` 로 이미 등록되어 있다.
 
-1. **메일 발송 계정 (sionlee@ngokcoc.or.kr)** — 그 메일이 Google Workspace 면 [앱 비밀번호](https://myaccount.google.com/apppasswords) 발급(2단계 인증 필요). 다른 메일 서비스면 그쪽 SMTP 호스트·포트·비밀번호.
+1. 메일플러그 웹메일 → 환경설정 → 외부 메일 연동(POP3/SMTP) 사용 켜기
+2. 메일 비밀번호를 등록:
    ```bash
    npx vercel env add SMTP_PASS production
    ```
-   (SMTP_USER, SMTP_HOST, SMTP_PORT, MAIL_FROM 은 이미 등록됨. Gmail 이 아니면 `npx vercel env rm SMTP_HOST production` 후 다시 add)
-   그리고 Supabase → Authentication → Emails → SMTP Settings 에도 같은 값.
-   없으면: Zoom 안내 메일은 "발송 실패"로 남고, 비밀번호 재설정 메일은 시간당 2통 제한.
-2. **R2 (선택)** — Cloudflare 이메일 확인 후 R2 → Manage API Tokens → Create (Object Read & Write). Access Key ID / Secret 을 `.env.local` 의 `R2_*` 에 넣고 `NEXT_PUBLIC_R2=1`, 그 다음:
-   ```bash
-   node --env-file=.env.local scripts/r2-cors.mjs
-   ```
-   Vercel 에도 같은 다섯 개 등록 후 `npx vercel --prod`. 안 넣으면 Supabase 저장소(1GB, 50MB)로 동작.
+3. Supabase → Authentication → Emails → SMTP Settings 에도 같은 값 (Host `smtp.mailplug.co.kr`, Port `465`, User·Sender 는 메일 주소). 이걸 넣어야 비밀번호 재설정 메일이 시간당 2통 제한에서 풀린다.
+4. `npx vercel --prod`
+
+없으면: Zoom 안내 메일은 "발송 실패"로 남고 재시도 버튼으로 나중에 보낼 수 있다. 나머지는 전부 동작.
+발신 계정을 팀 메일로 바꿀 때는 `SMTP_USER`, `MAIL_FROM`, `SMTP_PASS` 세 개만 교체.
 
 ### 백업
 
