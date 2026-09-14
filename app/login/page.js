@@ -70,7 +70,7 @@ export default function Login() {
             {msg && <div className="note" style={{ background: "var(--green)", color: "var(--greenT)", marginTop: 10 }}>{msg}</div>}
             <button className="b1" type="submit" disabled={busy} style={{ width: "100%", marginTop: 18 }}>{busy ? "확인 중…" : "로그인"}</button>
             <div style={{ fontSize: 11, color: "var(--ink3)", marginTop: 14, textAlign: "center" }}>
-              계정은 사업운영팀이 발급합니다. · <span className="lnk" onClick={reset}>비밀번호 재설정</span>
+              계정은 파트너십지원부가 발급합니다. · <span className="lnk" onClick={reset}>비밀번호 재설정</span>
             </div>
           </>
         ) : (

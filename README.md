@@ -45,7 +45,7 @@ node --env-file=.env.local scripts/e2e-check.mjs
 4. 다시 **SQL Editor** 에서 본인을 관리자로 등록 (이메일만 바꿔서 실행):
    ```sql
    insert into profiles (id, role, name, title, email)
-   select id, 'admin', '홍길동', '사업운영팀', email from auth.users where email = 'sionlee0825@gmail.com';
+   select id, 'admin', '홍길동', '파트너십지원부', email from auth.users where email = 'sionlee0825@gmail.com';
    ```
 5. **Project Settings → API** 에서 세 값 복사:
    - Project URL

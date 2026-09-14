@@ -1,7 +1,7 @@
 import "./globals.css";
 import "./portal.css";
 
-export const metadata = { title: "이음 · NGO 파트너스 포털", description: "2026 지역사회 변화지원 사업관리 포털" };
+export const metadata = { title: "이음 · NGO 파트너스 포털", description: "2027 국제나눔 파트너십 지원사업 사업관리 포털" };
 
 export default function RootLayout({ children }) {
   return (

@@ -17,7 +17,7 @@ export async function POST(req) {
     to: c.orgs.manager_email, subject: `[이음] ${T.label} 일정 및 Zoom 안내 (${fmt(c.date)})`,
     html: `<p>${c.orgs.name} ${c.orgs.manager_name} ${c.orgs.manager_title}님,</p>
 <p>${T.label} 일정이 <b>${fmt(c.date)}</b>로 확정되었습니다. (1회 60분 · 온라인)</p>
-<p>Zoom 링크: <a href="${c.zoom}">${c.zoom}</a></p><p>사업운영팀 드림</p>`,
+<p>Zoom 링크: <a href="${c.zoom}">${c.zoom}</a></p><p>파트너십지원부 드림</p>`,
   });
   await s.from("confirms").update({ mailed_at: r.ok ? new Date().toISOString() : null, mail_failed: !r.ok }).match({ org_id: orgId, type });
   return NextResponse.json({ ok: r.ok, reason: r.reason, to: c.orgs.manager_email });

@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { sb } from "@/lib/supabase/client";
 import { loadDb, run, uploadFiles, download } from "@/lib/db";
-import { PROGRAM, CUR_YEAR, REPORT_DUE, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
+import { PROGRAM, TEAM, CUR_YEAR, REPORT_DUE, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
   CONSULT_TYPES, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb } from "@/lib/config";
 
 /* ══════════════════════════════════════════════════════════
@@ -563,7 +563,7 @@ function Annual({ db, reload, say, log, me, editable }) {
             <div className="sub">사업 시작부터 결과 공유까지, 한 해의 주요 일정을 확인하세요.</div>
           </div>
           <span className={`bg ${edit ? "g-req" : "g-rev"}`} style={{ fontSize: 10.5, padding: "5px 10px" }}>
-            {edit ? "편집 모드 · 관리자 전용" : "사업운영팀 · 수행기관 공유용"}</span>
+            {edit ? "편집 모드 · 관리자 전용" : `${TEAM} · 수행기관 공유용`}</span>
         </div>
 
         <div className="tabs" style={{ margin: "16px 0 14px" }}>
@@ -1865,6 +1865,13 @@ function Users({ db, reload, say, log, profile }) {
   const [f, setF] = useState(blank);
   const [org, setOrg] = useState({ name: "", picked: CUR_YEAR });
   const [busy, setBusy] = useState(false);
+  const [ed, setEd] = useState(null);   // {id, name, title} 이름·부서 인라인 수정
+
+  const saveEd = async () => {
+    try { await run(sb.from("profiles").update({ name: ed.name.trim(), title: ed.title.trim() }).eq("id", ed.id)); }
+    catch (e) { say(`저장 실패: ${e.message}`); return; }
+    setEd(null); reload(); say("저장했습니다. 다시 로그인하면 상단 표시도 바뀝니다.");
+  };
 
   const create = async () => {
     if (!f.email.trim() || f.password.length < 8) { say("이메일과 8자 이상 비밀번호를 입력해 주세요."); return; }
@@ -1944,15 +1951,24 @@ function Users({ db, reload, say, log, profile }) {
       <div className="card">
         <div className="chd"><h3>계정 목록</h3><span style={{ fontSize: 11, color: "var(--ink3)" }}>{db.profiles.length}개</span></div>
         <table>
-          <thead><tr><th style={{ width: 90 }}>구분</th><th>이름 / 기관</th><th>이메일</th><th style={{ width: 80 }} /></tr></thead>
+          <thead><tr><th style={{ width: 90 }}>구분</th><th>이름 / 기관</th><th>이메일</th><th style={{ width: 150 }} /></tr></thead>
           <tbody>
             {db.profiles.map((p) => (
               <tr key={p.id}>
                 <td><span className={`bg ${p.role === "admin" ? "g-app" : p.role === "expert" ? "g-sub" : "g-rev"}`}>{ROLE[p.role]}</span></td>
-                <td>{p.role === "org" ? (orgOf(p.org_id)?.name ?? "—") : <>{p.name} <span style={{ color: "var(--ink2s)" }}>{p.title}</span></>}</td>
+                <td>{p.role === "org" ? (orgOf(p.org_id)?.name ?? "—")
+                  : ed?.id === p.id ? (
+                    <span style={{ display: "flex", gap: 6 }}>
+                      <input style={{ padding: "5px 8px" }} placeholder="이름" value={ed.name} onChange={(e) => setEd({ ...ed, name: e.target.value })} />
+                      <input style={{ padding: "5px 8px" }} placeholder="부서·직책" value={ed.title} onChange={(e) => setEd({ ...ed, title: e.target.value })} />
+                    </span>
+                  ) : <>{p.name} <span style={{ color: "var(--ink2s)" }}>{p.title}</span></>}</td>
                 <td style={{ color: "var(--brand2)" }}>{p.email}</td>
-                <td style={{ textAlign: "right" }}>
-                  {p.id !== profile.id && <button className="b2 bs" onClick={() => remove(p)}>삭제</button>}
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  {p.role !== "org" && (ed?.id === p.id
+                    ? <><button className="b1 bs" onClick={saveEd}>저장</button> <button className="b2 bs" onClick={() => setEd(null)}>취소</button></>
+                    : <button className="b2 bs" onClick={() => setEd({ id: p.id, name: p.name, title: p.title })}>수정</button>)}
+                  {p.id !== profile.id && <> <button className="b2 bs" onClick={() => remove(p)}>삭제</button></>}
                 </td>
               </tr>
             ))}
