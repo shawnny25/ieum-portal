@@ -6,17 +6,33 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 - Supabase 프로젝트: `ieum-portal` (ref `kcgiddadxjbjoimfzfwr`, Seoul)
 - GitHub: https://github.com/shawnny25/ieum-portal (main 에 push 하면 Vercel 자동 배포)
 
-## 0. 현재 상태 (2026-09-12 자동 구축 결과)
+## 0. 한 달 무료 테스트 준비 (2026-09-14)
 
-완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필(sionlee0825@gmail.com), Vercel 배포, 공개 env 2개.
-남은 것은 아래 두 가지뿐.
+완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필, Vercel 배포, 자동 정지 방지 크론(매일 0시), Gmail 메일 발송 경로.
+직접 해야 하는 것 세 가지. 전부 명령 한 줄에 값 붙여넣기.
 
-1. **비밀번호 설정** — 초대 메일이 sionlee0825@gmail.com 으로 발송됨. 만료됐으면 https://ieum-portal.vercel.app/login 에서 이메일 입력 후 "비밀번호 재설정" 클릭.
-2. **SUPABASE_SERVICE_ROLE_KEY 등록** — 계정 발급 메뉴에 필요. Supabase → Project Settings → API Keys → Secret keys → default 의 값을 복사해서:
+1. **서비스 키** — 계정 발급 메뉴에 필요. Supabase → Project Settings → API Keys → Secret keys → default 값 복사 후:
    ```bash
    npx vercel env add SUPABASE_SERVICE_ROLE_KEY production
    ```
-   (붙여넣고 Enter) 그리고 `.env.local` 의 같은 줄에도 붙여넣기. 그 뒤 `npx vercel --prod`.
+2. **메일 발송용 Gmail** — 팀 Gmail 계정에서 [앱 비밀번호](https://myaccount.google.com/apppasswords) 발급(2단계 인증 필요) 후:
+   ```bash
+   npx vercel env add GMAIL_USER production
+   ```
+   ```bash
+   npx vercel env add GMAIL_APP_PASSWORD production
+   ```
+3. **Supabase 인증 메일도 같은 Gmail 로** — 무료 기본 발송은 시간당 2통이라 비밀번호 재설정이 몰리면 막힌다.
+   Supabase → Authentication → Emails → SMTP Settings → Enable Custom SMTP:
+   Host `smtp.gmail.com`, Port `465`, User = Gmail 주소, Password = 앱 비밀번호, Sender = Gmail 주소.
+
+세 개 넣은 뒤 `npx vercel --prod` 한 번. `.env.local` 에도 같은 값을 넣으면 로컬에서도 동작.
+
+### 무료 플랜에서 한 달 쓸 때 한계
+
+- 파일 저장소 1GB, 파일당 50MB. 기관 20곳이 40MB 보고서를 두 번씩 내면 꽉 찬다. 테스트 중에는 샘플 파일을 작게.
+- 자동 백업 없음. 유료 전환 전까지는 중요한 데이터가 생기면 SQL Editor 에서 `select * from ...` 으로 내려받아 둘 것.
+- 유료(Supabase Pro, 월 $25) 전환 시 위 둘이 해결되고 코드 변경은 `lib/config.js` 의 `MAX_MB` 만 200 으로.
 
 ## 1. Supabase 설정 (한 번만)
 
