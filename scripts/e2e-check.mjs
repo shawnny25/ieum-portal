@@ -24,7 +24,7 @@ try {
   assert(!ue, ue?.message);
   cleanup.push(() => admin.auth.admin.deleteUser(u.user.id));
   await admin.from("profiles").insert({ id: u.user.id, role: "org", org_id: mine.id, email });
-  await admin.from("versions").insert({ org_id: other.id, no: 1, files: [] });
+  await admin.from("versions").insert({ org_id: other.id, kind: "mid", no: 1, files: [] });
   ok("임시 데이터 생성");
 
   // 2. 기관 계정으로 로그인
@@ -43,10 +43,10 @@ try {
   assert((await org.from("settings").update({ data: { program: "x" } }).eq("id", 1)).error || (await admin.from("settings").select("data").eq("id", 1).single()).data.data.program !== "x"); ok("사업 설정은 못 바꿈");
 
   // 4. 쓰기 권한
-  assert(!(await org.from("submissions").upsert({ org_id: mine.id, status: "submitted" })).error); ok("본인 제출 상태 갱신");
-  assert((await org.from("submissions").upsert({ org_id: mine.id, status: "approved" })).error); ok("본인이 승인 상태로 못 바꿈");
-  assert((await org.from("submissions").upsert({ org_id: other.id, status: "submitted" })).error); ok("다른 기관 제출 못 건드림");
-  assert(!(await org.from("versions").insert({ org_id: mine.id, no: 1, files: [] })).error); ok("본인 버전 추가");
+  assert(!(await org.from("submissions").upsert({ org_id: mine.id, kind: "mid", status: "submitted" })).error); ok("본인 제출 상태 갱신");
+  assert((await org.from("submissions").upsert({ org_id: mine.id, kind: "mid", status: "approved" })).error); ok("본인이 승인 상태로 못 바꿈");
+  assert((await org.from("submissions").upsert({ org_id: other.id, kind: "mid", status: "submitted" })).error); ok("다른 기관 제출 못 건드림");
+  assert(!(await org.from("versions").insert({ org_id: mine.id, kind: "result", no: 1, files: [] })).error); ok("본인 버전 추가");
   assert(!(await org.from("logs").insert({ who: "e2e", action: "test" })).error); ok("로그 기록");
   assert((await org.from("logs").select("*")).data.length === 0); ok("로그는 못 읽음");
   const { error: me } = await org.from("orgs").update({ manager_name: "홍길동" }).eq("id", mine.id);

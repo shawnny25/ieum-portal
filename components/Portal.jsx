@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { sb } from "@/lib/supabase/client";
 import { loadDb, run, uploadFiles, download } from "@/lib/db";
-import { PROGRAM, TEAM, CUR_YEAR, REPORT_DUE, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
+import { PROGRAM, TEAM, CUR_YEAR, REPORTS, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
   CONSULT_TYPES, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb, currentSettings } from "@/lib/config";
 
 /* ══════════════════════════════════════════════════════════
@@ -13,6 +13,19 @@ import { PROGRAM, TEAM, CUR_YEAR, REPORT_DUE, FIX_DAYS, CAP, MAX_MB, APPROVAL_TH
 
 let ORGS = [];
 const orgOf = (id) => ORGS.find((o) => o.id === id);
+const subOf = (db, orgId, kind) => db.subs.find((x) => x.orgId === orgId && x.kind === kind);
+const reportOf = (kind) => REPORTS.find((r) => r.key === kind) || REPORTS[0];
+// 마감이 안 지난 첫 보고서, 없으면 마지막
+const defaultKind = () => (REPORTS.find((r) => r.due >= TODAY) || REPORTS[REPORTS.length - 1]).key;
+const ReportTabs = ({ kind, setKind }) => (
+  <div className="tabs">
+    {REPORTS.map((r) => (
+      <div key={r.key} className={`tb ${kind === r.key ? "tb-on" : ""}`} onClick={() => setKind(r.key)}>
+        {r.label}<span className="mono" style={{ fontSize: 10.5, color: "var(--ink3)", marginLeft: 6 }}>{r.due.slice(5)}</span>
+      </div>
+    ))}
+  </div>
+);
 const dueFix = () => { const d = new Date(); d.setDate(d.getDate() + FIX_DAYS); return d.toISOString().slice(0, 10); };
 
 /* ─────────── 소품 ─────────── */
@@ -117,6 +130,7 @@ export default function Portal({ profile }) {
   const [db, setDb] = useState(null);
   const [page, setPage] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [kind, setKind] = useState(null);      // 현재 보고서 종류 (REPORTS.key)
   const [toast, setToast] = useState(null);
   const [popup, setPopup] = useState(null);
   const [loadErr, setLoadErr] = useState("");
@@ -174,7 +188,8 @@ export default function Portal({ profile }) {
     </div>
   );
 
-  const ctx = { db, reload, say, go, log, me, who, role, orgOf, detail, setDetail, profile };
+  const curKind = kind ?? defaultKind();
+  const ctx = { db, reload, say, go, log, me, who, role, orgOf, detail, setDetail, profile, kind: curKind, setKind, R: reportOf(curKind) };
 
   return (
     <div className="ip" style={{ display: "flex", minHeight: "100vh" }}>
@@ -191,7 +206,7 @@ export default function Portal({ profile }) {
           <div style={{ color: "#fff", fontWeight: 500, marginBottom: 3 }}>{PROGRAM}</div>
           {role === "org"
             ? <>이용 기간 {me.picked} — {me.picked + 2} (3년)<br />{me.year}차년도 수행기관</>
-            : <>{db.subs.length}개 기관과 함께하는 사업<br />운영 기간 {CUR_YEAR}.03 — 12</>}
+            : <>{db.orgList.length}개 기관과 함께하는 사업<br />운영 기간 {CUR_YEAR}.03 — 12</>}
         </div>
       </div>
 
@@ -266,10 +281,11 @@ export default function Portal({ profile }) {
 
 /* ═══════════ 관리자 : 대시보드 ═══════════ */
 
-function AdminDash({ db, go, setDetail }) {
+function AdminDash({ db, go, setDetail, kind, setKind, R }) {
+  const subs = db.subs.filter((s) => s.kind === kind);
   const c = { none: 0, submitted: 0, reviewing: 0, revision: 0, approved: 0 };
-  db.subs.forEach((s) => c[s.status]++);
-  const pct = Math.round((c.approved / (db.subs.length || 1)) * 100);
+  subs.forEach((s) => c[s.status]++);
+  const pct = Math.round((c.approved / (subs.length || 1)) * 100);
   const pending = db.docs.filter((d) => d.status === "pending").length;
   const h2 = CONSULT_TYPES.find((t) => t.key === "h2");
   const applied = new Set(db.avail.filter((a) => a.type === "h2").map((a) => a.orgId)).size;
@@ -278,6 +294,7 @@ function AdminDash({ db, go, setDetail }) {
   return (
     <div>
       <PageHead title="통합 대시보드" sub="기관별 진행 상황과 오늘 해야 할 업무를 살펴보세요." />
+      <ReportTabs kind={kind} setKind={setKind} />
 
       <div className="card" style={{ display: "flex", padding: "14px 0", marginBottom: 14 }}>
         {[["미제출", c.none, "#98A3BC"], ["검토 중", c.reviewing, "#3E63C4"], ["수정 요청", c.revision, "#D9A03C"],
@@ -293,12 +310,12 @@ function AdminDash({ db, go, setDetail }) {
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="card" style={{ marginBottom: 14 }}>
-            <div className="chd"><h3>기관별 제출 현황 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>중간보고서</span></h3>
+            <div className="chd"><h3>기관별 제출 현황 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{R.label}</span></h3>
               <span className="lnk" onClick={() => go("submit")}>전체 보기 →</span></div>
             <table>
               <thead><tr><th>기관명</th><th>진행 상태</th><th>최근 제출</th><th>버전</th><th /></tr></thead>
               <tbody>
-                {db.subs.slice(0, 6).map((s) => {
+                {subs.slice(0, 6).map((s) => {
                   const o = orgOf(s.orgId); const v = s.versions[s.versions.length - 1];
                   return (
                     <tr key={s.id} className="rw">
@@ -315,7 +332,7 @@ function AdminDash({ db, go, setDetail }) {
             </table>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 16px",
               borderTop: "1px solid var(--line2)", fontSize: 11, color: "var(--ink3)" }}>
-              <span>{db.subs.length}개 기관 중 최대 6개 표시</span><span>마감일 {REPORT_DUE}</span>
+              <span>{subs.length}개 기관 중 최대 6개 표시</span><span>마감일 {R.due}</span>
             </div>
           </div>
 
@@ -338,21 +355,21 @@ function AdminDash({ db, go, setDetail }) {
 
         <div style={{ width: 236, flexShrink: 0 }}>
           <div className="card" style={{ padding: 16, marginBottom: 14 }}>
-            <h3 style={{ margin: "0 0 12px", fontSize: 13.5 }}>중간보고서 완료율</h3>
+            <h3 style={{ margin: "0 0 12px", fontSize: 13.5 }}>{R.label} 완료율</h3>
             <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
               <span style={{ fontSize: 11, color: "var(--ink2s)" }}>최종 승인 기준</span>
               <span><b className="mono" style={{ fontSize: 25, color: "var(--brand2)" }}>{pct}</b>
                 <span style={{ fontSize: 12, color: "var(--brand2)" }}>%</span></span>
             </div>
             <div className="bar" style={{ margin: "7px 0 8px" }}><div style={{ width: `${pct}%` }} /></div>
-            <div style={{ fontSize: 11, color: "var(--ink3)" }}>전체 {db.subs.length}건 중 {c.approved}건 완료</div>
+            <div style={{ fontSize: 11, color: "var(--ink3)" }}>전체 {subs.length}건 중 {c.approved}건 완료</div>
           </div>
 
           <div className="card" style={{ padding: 16, marginBottom: 14 }}>
             <h3 style={{ margin: "0 0 10px", fontSize: 13.5 }}>{h2.label}</h3>
             <div style={{ fontSize: 11.5, color: "var(--ink2s)", lineHeight: 1.9 }}>
               기간 {h2.period}<br />
-              가능일자 신청 <b className="mono" style={{ color: "var(--ink)" }}>{applied}</b>/{db.subs.length} 기관<br />
+              가능일자 신청 <b className="mono" style={{ color: "var(--ink)" }}>{applied}</b>/{db.orgList.length} 기관<br />
               일정 확정 <b className="mono" style={{ color: "var(--greenT)" }}>{fixed}</b>건
             </div>
             <button className="b1" style={{ width: "100%", marginTop: 11 }} onClick={() => go("consult")}>컨설팅 일정 관리 →</button>
@@ -378,43 +395,43 @@ function AdminDash({ db, go, setDetail }) {
 /* ═══════════ 관리자 : 자료 제출 · 검토 ═══════════ */
 
 function AdminSubmit(ctx) {
-  const { db, reload, say, log, who, detail, setDetail } = ctx;
+  const { db, reload, say, log, who, detail, setDetail, kind, setKind, R } = ctx;
   const [q, setQ] = useState(""); const [filter, setFilter] = useState("all"); const [text, setText] = useState("");
 
   if (detail) {
-    const o = orgOf(detail); const s = db.subs.find((x) => x.orgId === detail);
+    const o = orgOf(detail); const s = subOf(db, detail, kind);
     // ponytail: 여러 테이블 순차 쓰기 (트랜잭션 아님). 문제 생기면 Postgres 함수(rpc)로 묶을 것.
-    const act = async (kind) => {
-      if (kind !== "start" && !text.trim()) { say("의견을 입력해 주세요."); return; }
+    const act = async (act_) => {
+      if (act_ !== "start" && !text.trim()) { say("의견을 입력해 주세요."); return; }
       const vno = s.versions[s.versions.length - 1].no;
       try {
-        if (kind === "start") {
-          await run(sb.from("submissions").update({ status: "reviewing" }).eq("org_id", detail));
+        if (act_ === "start") {
+          await run(sb.from("submissions").update({ status: "reviewing" }).match({ org_id: detail, kind }));
         } else {
-          await run(sb.from("feedbacks").insert({ org_id: detail, v: vno, author: who, severity: kind === "revise" ? "req" : "info", content: text.trim() }));
-          if (kind === "revise") {
-            await run(sb.from("submissions").update({ status: "revision", due_fix: dueFix() }).eq("org_id", detail));
+          await run(sb.from("feedbacks").insert({ org_id: detail, kind, v: vno, author: who, severity: act_ === "revise" ? "req" : "info", content: text.trim() }));
+          if (act_ === "revise") {
+            await run(sb.from("submissions").update({ status: "revision", due_fix: dueFix() }).match({ org_id: detail, kind }));
           } else {
-            await run(sb.from("submissions").update({ status: "approved", due_fix: null }).eq("org_id", detail));
-            await run(sb.from("versions").update({ final: false }).eq("org_id", detail));
-            await run(sb.from("versions").update({ final: true }).match({ org_id: detail, no: vno }));
-            await run(sb.from("alerts").insert({ org_id: detail, text: "중간보고서가 최종 승인되었습니다." }));
+            await run(sb.from("submissions").update({ status: "approved", due_fix: null }).match({ org_id: detail, kind }));
+            await run(sb.from("versions").update({ final: false }).match({ org_id: detail, kind }));
+            await run(sb.from("versions").update({ final: true }).match({ org_id: detail, kind, no: vno }));
+            await run(sb.from("alerts").insert({ org_id: detail, text: `${R.label}가 최종 승인되었습니다.` }));
           }
-          await log(kind === "revise" ? "수정 요청" : "최종 승인", `${o.name} · 중간보고서`);
+          await log(act_ === "revise" ? "수정 요청" : "최종 승인", `${o.name} · ${R.label}`);
         }
       } catch (e) { say(`처리 실패: ${e.message}`); return; }
       setText(""); reload();
-      say(kind === "start" ? "검토를 시작했습니다." : kind === "revise" ? "수정을 요청했습니다." : "최종 승인했습니다.");
+      say(act_ === "start" ? "검토를 시작했습니다." : act_ === "revise" ? "수정을 요청했습니다." : "최종 승인했습니다.");
     };
 
     return (
       <div>
         <div style={{ marginBottom: 14 }}><span className="lnk" onClick={() => { setDetail(null); setText(""); }}>← 목록으로</span></div>
-        <PageHead title={o.name} sub={`${o.year}차년도 수행기관 · 담당 ${db.managers[o.id].name} ${db.managers[o.id].title}`}
+        <PageHead title={`${o.name} · ${R.label}`} sub={`${o.year}차년도 수행기관 · 담당 ${db.managers[o.id].name} ${db.managers[o.id].title}`}
           right={<Badge s={s.status} />} />
         {s.status === "none" ? (
           <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--ink3)" }}>
-            아직 제출된 자료가 없습니다. 마감은 {REPORT_DUE}입니다.
+            아직 제출된 자료가 없습니다. 마감은 {R.due}입니다.
           </div>
         ) : (
           <>
@@ -483,14 +500,15 @@ function AdminSubmit(ctx) {
     );
   }
 
-  const rows = db.subs.filter((s) => (filter === "all" || s.status === filter) && orgOf(s.orgId).name.includes(q));
+  const rows = db.subs.filter((s) => s.kind === kind && (filter === "all" || s.status === filter) && orgOf(s.orgId).name.includes(q));
 
   return (
     <div>
-      <PageHead title="자료 제출 · 검토" sub="중간보고서 제출부터 최종 승인까지, 모든 흐름을 한곳에서 확인하세요." />
+      <PageHead title="자료 제출 · 검토" sub="보고서 제출부터 최종 승인까지, 모든 흐름을 한곳에서 확인하세요." />
+      <ReportTabs kind={kind} setKind={setKind} />
       <div className="card">
-        <div className="chd"><h3>기관별 제출 현황 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>중간보고서</span></h3>
-          <span className="bg g-req" style={{ fontSize: 10.5 }}>제출 마감 09.18</span></div>
+        <div className="chd"><h3>기관별 제출 현황 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{R.label}</span></h3>
+          <span className="bg g-req" style={{ fontSize: 10.5 }}>제출 마감 {R.due}</span></div>
         <div style={{ padding: "12px 16px", display: "flex", gap: 8 }}>
           <input type="text" placeholder="기관명 검색" value={q} onChange={(e) => setQ(e.target.value)} />
           <select style={{ width: 116 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
@@ -1315,7 +1333,7 @@ function AdminBudget({ db, reload, say, log, who }) {
 
 function ExpertSubmit({ db, reload, say, log, me }) {
   const [type, setType] = useState("r2");
-  const [orgId, setOrgId] = useState(db.subs[0]?.orgId);
+  const [orgId, setOrgId] = useState(db.orgList[0]?.id);
   const T = EXPERT_REPORTS.find((r) => r.key === type);
   const mine = db.reports.filter((r) => r.expertId === me.id);
 
@@ -1350,7 +1368,7 @@ function ExpertSubmit({ db, reload, say, log, me }) {
         <div style={{ marginBottom: 14 }}>
           <label className="lbl">대상 기관</label>
           <select style={{ width: 240 }} value={orgId} onChange={(e) => setOrgId(Number(e.target.value))}>
-            {db.subs.map((s) => <option key={s.orgId} value={s.orgId}>{orgOf(s.orgId).name}</option>)}
+            {db.orgList.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </div>
         <Uploader label="보고서 제출" onDone={submit} />
@@ -1456,15 +1474,14 @@ function ExpertConsult({ db, reload, say, me }) {
 
 /* ═══════════ 기관 : 홈 · 자료 제출 ═══════════ */
 
-function OrgDash({ db, reload, say, go, me }) {
-  const s = db.subs.find((x) => x.orgId === me.id);
+function OrgDash({ db, reload, say, go, me, setKind }) {
+  const mine = REPORTS.map((r) => ({ r, s: subOf(db, me.id, r.key) }));
   const mgr = db.managers[me.id];
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState(mgr);
   const [errs, setErrs] = useState({});
   const cf = db.confirms.find((c) => c.orgId === me.id);
-  const todo = ["none", "revision"].includes(s.status);
-  const lastFb = [...s.feedbacks].reverse().find((f) => f.severity === "req");
+  const todos = mine.filter(({ s }) => ["none", "revision"].includes(s.status));
   const pendingDocs = db.docs.filter((d) => d.orgId === me.id && d.status === "pending").length;
 
   const saveMgr = async () => {
@@ -1518,34 +1535,30 @@ function OrgDash({ db, reload, say, go, me }) {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="chd"><h3>내가 할 일</h3>
-          <span className="bg g-req" style={{ fontSize: 10.5 }}>
-            {s.status === "revision" ? `수정 마감 ${s.dueFix?.slice(5)}` : `제출 마감 ${REPORT_DUE.slice(5)}`}</span></div>
-        {!todo ? (
-          <div style={{ padding: 26, textAlign: "center", background: "var(--green)", color: "var(--greenT)", fontSize: 12.5 }}>
-            {s.status === "approved" ? "중간보고서가 최종 승인되었습니다. 지금 제출할 자료는 없습니다."
-              : "제출이 완료되어 사무국이 검토하고 있습니다."}
-          </div>
-        ) : (
-          <div style={{ padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 500 }}>{CUR_YEAR} 중간보고서</div>
-                <div style={{ fontSize: 11.5, color: "var(--ink2s)", marginTop: 2 }}>
-                  사업 추진 현황 및 예산 집행 내역 · {s.status === "revision" ? `수정 마감 ${s.dueFix}` : `제출 마감 ${REPORT_DUE}`}
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>{todos.length ? `제출할 보고서 ${todos.length}건` : "지금 제출할 자료 없음"}</span></div>
+        {mine.map(({ r, s }) => {
+          const lastFb = [...s.feedbacks].reverse().find((f) => f.severity === "req");
+          const todo = ["none", "revision"].includes(s.status);
+          return (
+            <div key={r.key} style={{ padding: "13px 16px", borderBottom: "1px solid var(--line2)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 500 }}>{r.label} <Badge s={s.status} /></div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink2s)", marginTop: 2 }}>
+                    {s.status === "revision" ? `수정 마감 ${s.dueFix}` : s.status === "approved" ? "최종 승인 완료" : s.status === "none" ? `제출 마감 ${r.due}` : "사무국 검토 중"}
+                  </div>
                 </div>
+                {todo && <button className="b1" onClick={() => { setKind(r.key); go("submit"); }}>{s.status === "revision" ? "수정본 올리기" : "제출하기"}</button>}
               </div>
-              <button className="b1" onClick={() => go("submit")}>
-                {s.status === "revision" ? "수정본 올리기" : "제출하기"}</button>
+              {lastFb && s.status === "revision" && (
+                <div className="note" style={{ background: "var(--amber)", color: "#6B4A0D", marginTop: 10 }}>
+                  <div style={{ fontSize: 10.5, color: "var(--amberT)", marginBottom: 4 }}>{lastFb.author} · {lastFb.at} · v{lastFb.v}에 대한 수정 요청</div>
+                  {lastFb.content}
+                </div>
+              )}
             </div>
-            {lastFb && s.status === "revision" && (
-              <div className="note" style={{ background: "var(--amber)", color: "#6B4A0D", marginTop: 13 }}>
-                <div style={{ fontSize: 10.5, color: "var(--amberT)", marginBottom: 4 }}>
-                  {lastFb.author} · {lastFb.at} · v{lastFb.v}에 대한 수정 요청</div>
-                {lastFb.content}
-              </div>
-            )}
-          </div>
-        )}
+          );
+        })}
       </div>
 
       <div style={{ display: "flex", gap: 16 }}>
@@ -1576,17 +1589,19 @@ function OrgDash({ db, reload, say, go, me }) {
 
         <div className="card" style={{ flex: 1, padding: 16 }}>
           <h3 style={{ margin: "0 0 11px", fontSize: 13.5 }}>제출 이력</h3>
-          {s.versions.length === 0
+          {mine.every(({ s }) => s.versions.length === 0)
             ? <div style={{ fontSize: 11.5, color: "var(--ink3)" }}>아직 제출한 자료가 없습니다.</div>
-            : [...s.versions].reverse().map((v) => (
-              <div key={v.no} style={{ marginBottom: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            : mine.filter(({ s }) => s.versions.length).map(({ r, s }) => {
+              const v = s.versions[s.versions.length - 1];
+              return (
+                <div key={r.key} style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 7, fontSize: 12 }}>
+                  <span style={{ flex: 1 }}>{r.label}</span>
                   <b className="mono" style={{ color: "var(--brand2)" }}>v{v.no}</b>
                   <span className="mono" style={{ fontSize: 11, color: "var(--ink3)" }}>{v.at}</span>
                   {v.final && <span className="bg g-app" style={{ fontSize: 9.5 }}>최종본</span>}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           <button className="b2" style={{ width: "100%", marginTop: 8 }} onClick={() => go("submit")}>자료 제출 →</button>
         </div>
       </div>
@@ -1594,8 +1609,8 @@ function OrgDash({ db, reload, say, go, me }) {
   );
 }
 
-function OrgSubmit({ db, reload, say, log, me }) {
-  const s = db.subs.find((x) => x.orgId === me.id);
+function OrgSubmit({ db, reload, say, log, me, kind, setKind, R }) {
+  const s = subOf(db, me.id, kind);
   const [note, setNote] = useState(""); const [reply, setReply] = useState({}); const [err, setErr] = useState("");
   const isFix = s.status === "revision";
   const lastFb = [...s.feedbacks].reverse().find((f) => f.severity === "req");
@@ -1606,10 +1621,10 @@ function OrgSubmit({ db, reload, say, log, me }) {
     setErr("");
     const no = (s.versions[s.versions.length - 1]?.no || 0) + 1;
     try {
-      const meta = await uploadFiles(`org-${me.id}/v${no}`, files);
-      await run(sb.from("versions").insert({ org_id: me.id, no, note: note.trim(), files: meta }));
-      await run(sb.from("submissions").upsert({ org_id: me.id, status: "submitted", due_fix: null }));
-      await log("자료 제출", `중간보고서 v${no}`);
+      const meta = await uploadFiles(`org-${me.id}/${kind}/v${no}`, files);
+      await run(sb.from("versions").insert({ org_id: me.id, kind, no, note: note.trim(), files: meta }));
+      await run(sb.from("submissions").upsert({ org_id: me.id, kind, status: "submitted", due_fix: null }));
+      await log("자료 제출", `${R.label} v${no}`);
     } catch (e) { say(`제출 실패: ${e.message}`); throw e; }
     reload();
     setNote("");
@@ -1626,7 +1641,8 @@ function OrgSubmit({ db, reload, say, log, me }) {
 
   return (
     <div>
-      <PageHead title="자료 제출" sub={`${CUR_YEAR} 중간보고서 · 제출 마감 ${REPORT_DUE}`} right={<Badge s={s.status} />} />
+      <PageHead title="자료 제출" sub={`${R.label} · 제출 마감 ${R.due}`} right={<Badge s={s.status} />} />
+      <ReportTabs kind={kind} setKind={setKind} />
 
       {locked ? (
         <div className="card note" style={{ textAlign: "center", padding: 22,
@@ -1692,16 +1708,17 @@ function OrgSubmit({ db, reload, say, log, me }) {
 
 /* ═══════════ 최종 자료실 · 참여 기관 · 공지 · 로그 ═══════════ */
 
-function Archive({ db, say, log }) {
-  const rows = db.subs.filter((s) => s.status === "approved");
+function Archive({ db, say, log, kind, setKind, R }) {
+  const rows = db.subs.filter((s) => s.kind === kind && s.status === "approved");
   const total = rows.reduce((a, s) => a + s.versions.filter((v) => v.final)
     .reduce((x, v) => x + v.files.reduce((y, f) => y + f.s, 0), 0), 0);
   return (
     <div>
       <PageHead title="최종 자료실" sub="사무국이 최종 승인한 버전만 모았습니다." />
+      <ReportTabs kind={kind} setKind={setKind} />
       <div className="card">
         <div className="chd">
-          <h3>승인된 중간보고서 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{rows.length}개 기관</span></h3>
+          <h3>승인된 {R.label} <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{rows.length}개 기관</span></h3>
           <span style={{ fontSize: 11, color: "var(--ink3)" }}>총 {(total / 1024).toFixed(2)}GB</span>
         </div>
         <table>
@@ -1728,7 +1745,7 @@ function Archive({ db, say, log }) {
   );
 }
 
-function OrgsPage({ db, setDetail, go }) {
+function OrgsPage({ db, setDetail, go, kind, R }) {
   const [yf, setYf] = useState(0);
   const ORGS = db.orgs.filter((o) => !o.ended && o.year >= 1), ENDED = db.orgs.filter((o) => o.ended);
   const cnt = { 1: 0, 2: 0, 3: 0 };
@@ -1760,7 +1777,7 @@ function OrgsPage({ db, setDetail, go }) {
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
             {ORGS.filter((o) => o.year === y).map((o) => {
-              const s = db.subs.find((x) => x.orgId === o.id);
+              const s = subOf(db, o.id, kind);
               return (
                 <div key={o.id} className="card" style={{ width: "calc(33.33% - 8px)", padding: 15 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1772,7 +1789,7 @@ function OrgsPage({ db, setDetail, go }) {
                     {o.picked}년 선발 · 이용 {o.picked}—{o.picked + 2}</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                     marginTop: 13, paddingTop: 11, borderTop: "1px solid var(--line2)" }}>
-                    <Badge s={s.status} />
+                    <span><Badge s={s.status} /><span style={{ fontSize: 10, color: "var(--ink3)", marginLeft: 5 }}>{R.label}</span></span>
                     <span className="lnk" onClick={() => { go("submit"); setTimeout(() => setDetail(o.id), 0); }}>제출 자료 →</span>
                   </div>
                 </div>
@@ -2001,19 +2018,21 @@ function Settings({ db, reload, say, log }) {
   const delRow = (k, i) => up(k, f[k].filter((_, j) => j !== i));
   const usedTypes = new Set([...db.avail.map((a) => a.type), ...db.confirms.map((c) => c.type)]);
   const usedReports = new Set(db.reports.map((r) => r.type));
+  const usedKinds = new Set(db.subs.filter((s) => s.versions.length).map((s) => s.kind));
   const D = /^\d{4}\.\d{2}\.\d{2}$/;
 
   const save = async () => {
     const e = [];
     if (!f.program.trim()) e.push("사업명");
-    if (!D.test(f.report_due)) e.push("중간보고서 마감 (YYYY.MM.DD)");
+    f.reports.forEach((r, i) => { if (!r.label.trim()) e.push(`보고서 ${i + 1} 이름`); if (!D.test(r.due)) e.push(`보고서 ${i + 1} 마감 (YYYY.MM.DD)`); });
     f.consult_types.forEach((t, i) => { if (!t.label.trim()) e.push(`컨설팅 ${i + 1} 이름`);
       t.dates.split(",").map((s) => s.trim()).filter(Boolean).forEach((d) => { if (!D.test(d)) e.push(`컨설팅 ${i + 1} 일자 "${d}"`); }); });
     f.expert_reports.forEach((r, i) => { if (!r.label.trim()) e.push(`전문가 보고서 ${i + 1} 이름`); if (!D.test(r.due)) e.push(`전문가 보고서 ${i + 1} 마감`); });
     f.notices.forEach((n, i) => { if (!n.t.trim()) e.push(`공지 ${i + 1} 제목`); });
     if (e.length) { say(`확인 필요: ${e.slice(0, 3).join(", ")}${e.length > 3 ? " 외" : ""}`); return; }
     const data = {
-      program: f.program.trim(), team: f.team.trim(), program_year: Number(f.program_year), report_due: f.report_due,
+      program: f.program.trim(), team: f.team.trim(), program_year: Number(f.program_year),
+      reports: f.reports.map((r) => ({ key: r.key, label: r.label.trim(), due: r.due })),
       fix_days: Number(f.fix_days) || 7, cap: Number(f.cap) || 2,
       consult_types: f.consult_types.map((t) => ({ key: t.key, label: t.label.trim(), period: t.period.trim(), required: !!t.required,
         dates: t.dates.split(",").map((s) => s.trim()).filter(Boolean).sort() })),
@@ -2042,9 +2061,31 @@ function Settings({ db, reload, say, log }) {
           <div><label className="lbl">사업명</label><IN value={f.program} onChange={(e) => up("program", e.target.value)} /></div>
           <div><label className="lbl">운영 부서명 (문구·메일 서명)</label><IN value={f.team} onChange={(e) => up("team", e.target.value)} /></div>
           <div><label className="lbl">사업연도 (이 해에 선발된 기관 = 1차년도)</label><IN type="number" value={f.program_year} onChange={(e) => up("program_year", e.target.value)} /></div>
-          <div><label className="lbl">중간보고서 제출 마감 (YYYY.MM.DD)</label><IN value={f.report_due} onChange={(e) => up("report_due", e.target.value)} /></div>
           <div><label className="lbl">수정 요청 시 부여 기한 (일)</label><IN type="number" value={f.fix_days} onChange={(e) => up("fix_days", e.target.value)} /></div>
           <div><label className="lbl">컨설팅 일자별 확정 정원 (기관 수)</label><IN type="number" value={f.cap} onChange={(e) => up("cap", e.target.value)} /></div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="chd"><h3>기관 제출 보고서</h3>
+          <button className="b2 bs" onClick={() => up("reports", [...f.reports, { key: newKey("p"), label: "", due: "" }])}>+ 보고서 추가</button></div>
+        <table>
+          <thead><tr><th>이름</th><th style={{ width: 170 }}>제출 마감 (YYYY.MM.DD)</th><th style={{ width: 70 }} /></tr></thead>
+          <tbody>
+            {f.reports.map((r, i) => (
+              <tr key={r.key}>
+                <td><IN value={r.label} placeholder="중간보고서" onChange={(e) => upRow("reports", i, { label: e.target.value })} /></td>
+                <td><IN value={r.due} placeholder="2027.09.18" onChange={(e) => upRow("reports", i, { due: e.target.value })} /></td>
+                <td style={{ textAlign: "right" }}>
+                  {usedKinds.has(r.key) || f.reports.length === 1 ? <span style={{ fontSize: 10.5, color: "var(--ink3)" }}>{usedKinds.has(r.key) ? "제출 있음" : ""}</span>
+                    : <button className="b2 bs" onClick={() => delRow("reports", i)}>삭제</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--ink3)", borderTop: "1px solid var(--line2)" }}>
+          기관 화면의 자료 제출 탭이 이 순서대로 생깁니다. 이미 제출된 보고서 종류는 삭제할 수 없습니다.
         </div>
       </div>
 

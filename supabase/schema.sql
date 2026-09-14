@@ -256,3 +256,13 @@ alter table settings enable row level security;
 create policy adm on settings for all to authenticated using (is_admin()) with check (is_admin());
 create policy all_read on settings for select to authenticated using (true);
 insert into settings (id) values (1);
+
+-- ───────── 보고서 종류 (2026-09-14 추가) ─────────
+-- 신규 설치용: 위 create table 의 submissions / versions / feedbacks 에 kind 열이 필요하다.
+alter table submissions drop constraint submissions_pkey;
+alter table submissions add column kind text not null default 'mid';
+alter table submissions add primary key (org_id, kind);
+alter table versions add column kind text not null default 'mid';
+alter table versions drop constraint versions_org_id_no_key;
+alter table versions add unique (org_id, kind, no);
+alter table feedbacks add column kind text not null default 'mid';
