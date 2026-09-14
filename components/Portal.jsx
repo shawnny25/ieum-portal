@@ -2001,6 +2001,8 @@ function Users({ db, reload, say, log, profile }) {
 
 /* ═══════════ 관리자 : 사업 설정 ═══════════ */
 
+// 컴포넌트 안에서 정의하면 렌더마다 새 타입이 되어 입력칸이 리마운트됨 → 한글 조합이 끊긴다. 반드시 모듈 레벨.
+const IN = ({ style, ...props }) => <input style={{ padding: "6px 9px", ...style }} {...props} />;
 const CTA_PAGES = [["", "버튼 없음"], ["submit", "자료 제출"], ["consult", "컨설팅 일정"], ["budget", "예산변경 / 사업변경"], ["annual", "연간 사업 일정"]];
 const newKey = (p) => `${p}${Date.now().toString(36)}`;
 
@@ -2047,8 +2049,6 @@ function Settings({ db, reload, say, log }) {
     } catch (err) { say(`저장 실패: ${err.message}`); setBusy(false); return; }
     await reload(); setBusy(false); say("저장했습니다. 모든 화면에 바로 반영됩니다.");
   };
-
-  const IN = (props) => <input style={{ padding: "6px 9px" }} {...props} />;
 
   return (
     <div>
@@ -2142,7 +2142,7 @@ function Settings({ db, reload, say, log }) {
           <div key={i} style={{ padding: 16, borderBottom: "1px solid var(--line2)" }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <IN value={n.t} placeholder="제목" onChange={(e) => upRow("notices", i, { t: e.target.value })} />
-              <IN style={{ width: 130, padding: "6px 9px" }} value={n.d} placeholder="2027.03.02" onChange={(e) => upRow("notices", i, { d: e.target.value })} />
+              <IN style={{ width: 130 }} value={n.d} placeholder="2027.03.02" onChange={(e) => upRow("notices", i, { d: e.target.value })} />
               <button className="b2 bs" onClick={() => delRow("notices", i)}>삭제</button>
             </div>
             <textarea rows={4} value={n.body} placeholder="본문. 문단은 빈 줄로 구분" onChange={(e) => upRow("notices", i, { body: e.target.value })} />
