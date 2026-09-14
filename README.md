@@ -8,7 +8,7 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 
 ## 0. 한 달 무료 테스트 준비 (2026-09-14)
 
-완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필, Vercel 배포, 자동 정지 방지 크론(매일 0시), Gmail 메일 발송 경로.
+완료: Supabase 프로젝트·스키마·스토리지, 관리자 프로필, Vercel 배포, 자동 정지 방지 크론(매일 0시), Gmail 메일 발송 경로, R2 저장소 경로, 주간 백업 워크플로.
 직접 해야 하는 것 세 가지. 전부 명령 한 줄에 값 붙여넣기.
 
 1. **서비스 키** — 계정 발급 메뉴에 필요. Supabase → Project Settings → API Keys → Secret keys → default 값 복사 후:
@@ -28,11 +28,28 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 
 세 개 넣은 뒤 `npx vercel --prod` 한 번. `.env.local` 에도 같은 값을 넣으면 로컬에서도 동작.
 
-### 무료 플랜에서 한 달 쓸 때 한계
+### 파일 저장소를 R2 로 (무료 10GB, 파일당 200MB)
 
-- 파일 저장소 1GB, 파일당 50MB. 기관 20곳이 40MB 보고서를 두 번씩 내면 꽉 찬다. 테스트 중에는 샘플 파일을 작게.
-- 자동 백업 없음. 유료 전환 전까지는 중요한 데이터가 생기면 SQL Editor 에서 `select * from ...` 으로 내려받아 둘 것.
-- 유료(Supabase Pro, 월 $25) 전환 시 위 둘이 해결되고 코드 변경은 `lib/config.js` 의 `MAX_MB` 만 200 으로.
+키가 없으면 Supabase 저장소(1GB, 50MB)로 동작한다. 넣으면 그때부터 올리는 파일은 R2 로 간다.
+
+1. https://dash.cloudflare.com → R2 Object Storage → **Manage R2 API Tokens → Create API token**
+   권한 "Object Read & Write", 만료 없음. 생성 후 화면의 **Access Key ID / Secret Access Key** 와, R2 개요 화면 우측의 **Account ID** 를 복사.
+2. `.env.local` 의 `R2_*` 네 줄에 붙여넣고 `NEXT_PUBLIC_R2=1` 추가.
+3. 버킷 생성 + 브라우저 업로드 허용(CORS) 한 번:
+   ```bash
+   node --env-file=.env.local scripts/r2-cors.mjs
+   ```
+4. Vercel 에도 같은 다섯 개 등록 (`npx vercel env add R2_ACCOUNT_ID production` 식으로 반복) 후 `npx vercel --prod`.
+
+### 주간 DB 백업 (GitHub Actions, 무료)
+
+매주 월요일 새벽 3시에 DB 전체를 덤프해 GitHub 아티팩트로 90일 보관. `.github/workflows/backup.yml`.
+
+1. Supabase → 상단 **Connect** → Direct connection 문자열 복사 (비밀번호는 프로젝트 생성 때 것. 잊었으면 Project Settings → Database → Reset database password)
+2. https://github.com/shawnny25/ieum-portal/settings/secrets/actions → **New repository secret** → 이름 `SUPABASE_DB_URL`, 값은 위 문자열
+3. Actions 탭 → weekly-db-backup → **Run workflow** 로 한 번 돌려서 아티팩트가 생기는지 확인
+
+복원은 SQL Editor 에 덤프 파일 내용을 붙여넣으면 된다. R2 파일 자체는 백업하지 않는다(R2 는 자체 내구성 보장, 실수 삭제 방지는 버킷의 삭제 권한을 관리자만 갖는 것으로 대체).
 
 ## 1. Supabase 설정 (한 번만)
 

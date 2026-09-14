@@ -1,0 +1,29 @@
+# 매주 월요일 03:00 KST DB 전체(public·auth·storage 스키마)를 덤프해 Actions 아티팩트로 90일 보관.
+# 필요한 시크릿: SUPABASE_DB_URL (Supabase → Connect → Direct connection 문자열, 비밀번호 포함)
+name: weekly-db-backup
+on:
+  schedule:
+    - cron: "0 18 * * 0"   # UTC 일요일 18:00 = KST 월요일 03:00
+  workflow_dispatch:
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install pg_dump 17
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+      - name: Dump
+        env:
+          DB: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          test -n "$DB" || { echo "SUPABASE_DB_URL 시크릿이 없습니다"; exit 1; }
+          pg_dump "$DB" --schema=public --schema=auth --schema=storage --no-owner --no-privileges \
+            -f "ieum-$(date -u +%Y%m%d).sql"
+          ls -la *.sql
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ieum-db-${{ github.run_id }}
+          path: "*.sql"
+          retention-days: 90

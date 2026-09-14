@@ -104,7 +104,7 @@ const FileRow = ({ f, say, onDown }) => (
     <span style={{ fontSize: 12 }}>{f.n}</span>
     <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <span className="mono" style={{ fontSize: 11, color: "var(--ink3)" }}>{mb(f.s)}</span>
-      <button className="b2 bs" onClick={() => { onDown?.(); download(f.path).catch(() => say("파일을 찾을 수 없습니다.")); }}>다운로드 ↓</button>
+      <button className="b2 bs" onClick={() => { onDown?.(); download(f.path, f.n).catch(() => say("파일을 찾을 수 없습니다.")); }}>다운로드 ↓</button>
     </span>
   </div>
 );
@@ -1287,7 +1287,7 @@ function AdminBudget({ db, reload, say, log, who }) {
                 <span style={{ fontSize: 12 }}>{d.name}</span>
                 <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span className="mono" style={{ fontSize: 11, color: "var(--ink3)" }}>{mb(d.size)}</span>
-                  <button className="b2 bs" onClick={() => { log("문서 다운로드", `${orgOf(d.orgId).name} · ${d.name}`); download(d.path).catch(() => say("파일을 찾을 수 없습니다.")); }}>
+                  <button className="b2 bs" onClick={() => { log("문서 다운로드", `${orgOf(d.orgId).name} · ${d.name}`); download(d.path, d.name).catch(() => say("파일을 찾을 수 없습니다.")); }}>
                     다운로드 ↓</button>
                 </span>
               </div>
