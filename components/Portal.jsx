@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { sb } from "@/lib/supabase/client";
 import { loadDb, run, uploadFiles, download } from "@/lib/db";
 import { PROGRAM, TEAM, CUR_YEAR, REPORT_DUE, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
-  CONSULT_TYPES, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb } from "@/lib/config";
+  CONSULT_TYPES, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb, currentSettings } from "@/lib/config";
 
 /* ══════════════════════════════════════════════════════════
    이음 · NGO PARTNERS PORTAL — 관리자 / 기관 / 전문가 3종 화면
@@ -30,6 +30,7 @@ function Icon({ n }) {
     bell: "M4 6h11l5 5-5 5H4z",
     log: "M4 5h16M4 12h16M4 19h10",
     user: "M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0",
+    cog: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z",
   }[n];
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
     strokeLinecap="round" strokeLinejoin="round"><path d={p} /></svg>;
@@ -149,7 +150,7 @@ export default function Portal({ profile }) {
     admin: [["dash", "통합 대시보드", "grid"], ["submit", "자료 제출 · 검토", "doc"],
       ["annual", "연간 사업 일정", "cal"], ["consult", "컨설팅 일정", "cal"],
       ["budget", "예산변경 / 사업변경", "won"], ["archive", "최종 자료실", "box"],
-      ["orgs", "참여 기관", "org"], ["notice", "공지사항", "bell"], ["log", "활동 로그", "log"], ["users", "계정 관리", "user"]],
+      ["orgs", "참여 기관", "org"], ["notice", "공지사항", "bell"], ["log", "활동 로그", "log"], ["users", "계정 관리", "user"], ["settings", "사업 설정", "cog"]],
     org: [["dash", "내 사업 현황", "grid"], ["submit", "자료 제출", "doc"],
       ["annual", "연간 사업 일정", "cal"], ["consult", "컨설팅 일정", "cal"],
       ["budget", "예산변경 / 사업변경", "won"], ["notice", "공지사항", "bell"]],
@@ -216,6 +217,7 @@ export default function Portal({ profile }) {
             {cur === "notice" && <Notices go={go} />}
             {cur === "log" && <LogPage db={db} />}
             {cur === "users" && <Users {...ctx} />}
+            {cur === "settings" && <Settings {...ctx} />}
           </>}
           {role === "org" && <>
             {cur === "dash" && <OrgDash {...ctx} />}
@@ -1808,15 +1810,16 @@ function Notices({ go }) {
   return (
     <div>
       <PageHead title="공지사항" sub="사업 운영에 필요한 안내를 확인하세요." />
-      {NOTICES.map((n) => (
-        <div key={n.t} className="card" style={{ marginBottom: 14 }}>
+      {NOTICES.length === 0 && <div className="card" style={{ padding: 30, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>등록된 공지가 없습니다.</div>}
+      {NOTICES.map((n, i) => (
+        <div key={i} className="card" style={{ marginBottom: 14 }}>
           <div className="chd"><h3>{n.t}</h3>
             <span className="mono" style={{ fontSize: 11, color: "var(--ink3)" }}>{n.d}</span></div>
           <div style={{ padding: "16px 20px 18px" }}>
             {n.body.map((p, i) => (
               <p key={i} style={{ margin: "0 0 11px", fontSize: 12.5, lineHeight: 1.85, color: "#3D4A66" }}>{p}</p>
             ))}
-            <button className="b2" onClick={() => go(n.cta[1])}>{n.cta[0]}</button>
+            {n.cta && <button className="b2" onClick={() => go(n.cta[1])}>{n.cta[0]}</button>}
           </div>
         </div>
       ))}
@@ -1974,6 +1977,142 @@ function Users({ db, reload, say, log, profile }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════ 관리자 : 사업 설정 ═══════════ */
+
+const CTA_PAGES = [["", "버튼 없음"], ["submit", "자료 제출"], ["consult", "컨설팅 일정"], ["budget", "예산변경 / 사업변경"], ["annual", "연간 사업 일정"]];
+const newKey = (p) => `${p}${Date.now().toString(36)}`;
+
+function Settings({ db, reload, say, log }) {
+  const init = () => {
+    const c = currentSettings();
+    return { ...c,
+      consult_types: c.consult_types.map((t) => ({ ...t, dates: t.dates.join(", ") })),
+      notices: c.notices.map((n) => ({ t: n.t, d: n.d, body: n.body.join("\n\n"), ctaLabel: n.cta?.[0] || "", ctaPage: n.cta?.[1] || "" })) };
+  };
+  const [f, setF] = useState(init);
+  const [busy, setBusy] = useState(false);
+  const up = (k, v) => setF({ ...f, [k]: v });
+  const upRow = (k, i, patch) => up(k, f[k].map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const delRow = (k, i) => up(k, f[k].filter((_, j) => j !== i));
+  const usedTypes = new Set([...db.avail.map((a) => a.type), ...db.confirms.map((c) => c.type)]);
+  const usedReports = new Set(db.reports.map((r) => r.type));
+  const D = /^\d{4}\.\d{2}\.\d{2}$/;
+
+  const save = async () => {
+    const e = [];
+    if (!f.program.trim()) e.push("사업명");
+    if (!D.test(f.report_due)) e.push("중간보고서 마감 (YYYY.MM.DD)");
+    f.consult_types.forEach((t, i) => { if (!t.label.trim()) e.push(`컨설팅 ${i + 1} 이름`);
+      t.dates.split(",").map((s) => s.trim()).filter(Boolean).forEach((d) => { if (!D.test(d)) e.push(`컨설팅 ${i + 1} 일자 "${d}"`); }); });
+    f.expert_reports.forEach((r, i) => { if (!r.label.trim()) e.push(`전문가 보고서 ${i + 1} 이름`); if (!D.test(r.due)) e.push(`전문가 보고서 ${i + 1} 마감`); });
+    f.notices.forEach((n, i) => { if (!n.t.trim()) e.push(`공지 ${i + 1} 제목`); });
+    if (e.length) { say(`확인 필요: ${e.slice(0, 3).join(", ")}${e.length > 3 ? " 외" : ""}`); return; }
+    const data = {
+      program: f.program.trim(), team: f.team.trim(), program_year: Number(f.program_year), report_due: f.report_due,
+      fix_days: Number(f.fix_days) || 7, cap: Number(f.cap) || 2,
+      consult_types: f.consult_types.map((t) => ({ key: t.key, label: t.label.trim(), period: t.period.trim(), required: !!t.required,
+        dates: t.dates.split(",").map((s) => s.trim()).filter(Boolean).sort() })),
+      expert_reports: f.expert_reports.map((r) => ({ key: r.key, label: r.label.trim(), due: r.due })),
+      notices: f.notices.map((n) => ({ t: n.t.trim(), d: n.d, by: f.team.trim(), body: n.body.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean),
+        cta: n.ctaPage ? [n.ctaLabel || "바로가기 →", n.ctaPage] : null })),
+    };
+    setBusy(true);
+    try {
+      await run(sb.from("settings").upsert({ id: 1, data, updated_at: new Date().toISOString() }));
+      await log("사업 설정 변경", data.program);
+    } catch (err) { say(`저장 실패: ${err.message}`); setBusy(false); return; }
+    await reload(); setBusy(false); say("저장했습니다. 모든 화면에 바로 반영됩니다.");
+  };
+
+  const IN = (props) => <input style={{ padding: "6px 9px" }} {...props} />;
+
+  return (
+    <div>
+      <PageHead title="사업 설정" sub="사업명, 마감일, 컨설팅 회차, 공지사항을 여기서 바꿉니다. 저장하면 기관·전문가 화면에 즉시 반영됩니다."
+        right={<button className="b1" disabled={busy} onClick={save}>{busy ? "저장 중…" : "저장"}</button>} />
+
+      <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+        <h3 style={{ margin: "0 0 12px", fontSize: 13.5 }}>기본 정보</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div><label className="lbl">사업명</label><IN value={f.program} onChange={(e) => up("program", e.target.value)} /></div>
+          <div><label className="lbl">운영 부서명 (문구·메일 서명)</label><IN value={f.team} onChange={(e) => up("team", e.target.value)} /></div>
+          <div><label className="lbl">사업연도 (이 해에 선발된 기관 = 1차년도)</label><IN type="number" value={f.program_year} onChange={(e) => up("program_year", e.target.value)} /></div>
+          <div><label className="lbl">중간보고서 제출 마감 (YYYY.MM.DD)</label><IN value={f.report_due} onChange={(e) => up("report_due", e.target.value)} /></div>
+          <div><label className="lbl">수정 요청 시 부여 기한 (일)</label><IN type="number" value={f.fix_days} onChange={(e) => up("fix_days", e.target.value)} /></div>
+          <div><label className="lbl">컨설팅 일자별 확정 정원 (기관 수)</label><IN type="number" value={f.cap} onChange={(e) => up("cap", e.target.value)} /></div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="chd"><h3>컨설팅 회차</h3>
+          <button className="b2 bs" onClick={() => up("consult_types", [...f.consult_types, { key: newKey("c"), label: "", period: "", required: true, dates: "" }])}>+ 회차 추가</button></div>
+        <table>
+          <thead><tr><th style={{ width: 200 }}>이름</th><th style={{ width: 170 }}>기간 표시</th><th>가능 일자 (쉼표로 구분, YYYY.MM.DD)</th><th style={{ width: 60 }}>필수</th><th style={{ width: 70 }} /></tr></thead>
+          <tbody>
+            {f.consult_types.map((t, i) => (
+              <tr key={t.key}>
+                <td><IN value={t.label} placeholder="하반기 필수컨설팅" onChange={(e) => upRow("consult_types", i, { label: e.target.value })} /></td>
+                <td><IN value={t.period} placeholder="2027.09.21 – 09.25" onChange={(e) => upRow("consult_types", i, { period: e.target.value })} /></td>
+                <td><IN value={t.dates} placeholder="2027.09.21, 2027.09.22" onChange={(e) => upRow("consult_types", i, { dates: e.target.value })} /></td>
+                <td style={{ textAlign: "center" }}><input type="checkbox" style={{ width: "auto" }} checked={!!t.required} onChange={(e) => upRow("consult_types", i, { required: e.target.checked })} /></td>
+                <td style={{ textAlign: "right" }}>
+                  {usedTypes.has(t.key) ? <span style={{ fontSize: 10.5, color: "var(--ink3)" }}>신청 있음</span>
+                    : <button className="b2 bs" onClick={() => delRow("consult_types", i)}>삭제</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--ink3)", borderTop: "1px solid var(--line2)" }}>
+          기관이 이미 가능 일자를 신청한 회차는 삭제할 수 없습니다. 일자를 줄이면 그 일자의 신청 내역은 화면에서 사라집니다.
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="chd"><h3>전문가 보고서 종류</h3>
+          <button className="b2 bs" onClick={() => up("expert_reports", [...f.expert_reports, { key: newKey("r"), label: "", due: "" }])}>+ 종류 추가</button></div>
+        <table>
+          <thead><tr><th>이름</th><th style={{ width: 170 }}>제출 마감 (YYYY.MM.DD)</th><th style={{ width: 70 }} /></tr></thead>
+          <tbody>
+            {f.expert_reports.map((r, i) => (
+              <tr key={r.key}>
+                <td><IN value={r.label} onChange={(e) => upRow("expert_reports", i, { label: e.target.value })} /></td>
+                <td><IN value={r.due} onChange={(e) => upRow("expert_reports", i, { due: e.target.value })} /></td>
+                <td style={{ textAlign: "right" }}>
+                  {usedReports.has(r.key) ? <span style={{ fontSize: 10.5, color: "var(--ink3)" }}>제출 있음</span>
+                    : <button className="b2 bs" onClick={() => delRow("expert_reports", i)}>삭제</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <div className="chd"><h3>공지사항</h3>
+          <button className="b2 bs" onClick={() => up("notices", [{ t: "", d: TODAY, body: "", ctaLabel: "", ctaPage: "" }, ...f.notices])}>+ 공지 추가</button></div>
+        {f.notices.length === 0 && <div style={{ padding: 26, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>등록된 공지가 없습니다.</div>}
+        {f.notices.map((n, i) => (
+          <div key={i} style={{ padding: 16, borderBottom: "1px solid var(--line2)" }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <IN value={n.t} placeholder="제목" onChange={(e) => upRow("notices", i, { t: e.target.value })} />
+              <IN style={{ width: 130, padding: "6px 9px" }} value={n.d} placeholder="2027.03.02" onChange={(e) => upRow("notices", i, { d: e.target.value })} />
+              <button className="b2 bs" onClick={() => delRow("notices", i)}>삭제</button>
+            </div>
+            <textarea rows={4} value={n.body} placeholder="본문. 문단은 빈 줄로 구분" onChange={(e) => upRow("notices", i, { body: e.target.value })} />
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <select style={{ width: 180 }} value={n.ctaPage} onChange={(e) => upRow("notices", i, { ctaPage: e.target.value })}>
+                {CTA_PAGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              {n.ctaPage && <IN value={n.ctaLabel} placeholder="버튼 문구 (예: 자료 제출로 이동 →)" onChange={(e) => upRow("notices", i, { ctaLabel: e.target.value })} />}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

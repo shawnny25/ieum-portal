@@ -39,6 +39,8 @@ try {
   assert.equal(pr.length, 1); ok("프로필은 본인 것만");
   const { data: rm } = await org.from("roadmap").select("id");
   assert(rm.length > 0); ok("연간 일정은 읽힘");
+  assert((await org.from("settings").select("id")).data.length === 1); ok("사업 설정 읽힘");
+  assert((await org.from("settings").update({ data: { program: "x" } }).eq("id", 1)).error || (await admin.from("settings").select("data").eq("id", 1).single()).data.data.program !== "x"); ok("사업 설정은 못 바꿈");
 
   // 4. 쓰기 권한
   assert(!(await org.from("submissions").upsert({ org_id: mine.id, status: "submitted" })).error); ok("본인 제출 상태 갱신");

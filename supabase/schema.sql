@@ -245,3 +245,14 @@ insert into roadmap (year, m, "when", title, cat) values
  (3,6,'6월 3주차','종료 대비 정산 점검','report'),(3,9,'9월 18일','중간보고서 제출 마감','deadline'),
  (3,9,'9월 21 – 25일','하반기 필수컨설팅','consult'),(3,10,'10월 3주차','최종 현장점검','monitor'),
  (3,11,'11월 4주차','사업 종료보고 및 정산 심사','report'),(3,12,'12월 2주차','연말 결과공유회 · 성과 공유','etc');
+
+-- ───────── 사업 설정 (관리자 화면에서 편집, 한 행 jsonb) ─────────
+create table settings (
+  id int primary key default 1 check (id = 1),
+  data jsonb not null default '{}',
+  updated_at timestamptz not null default now()
+);
+alter table settings enable row level security;
+create policy adm on settings for all to authenticated using (is_admin()) with check (is_admin());
+create policy all_read on settings for select to authenticated using (true);
+insert into settings (id) values (1);
