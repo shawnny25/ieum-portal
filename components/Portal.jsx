@@ -26,6 +26,13 @@ const ReportTabs = ({ kind, setKind }) => (
     ))}
   </div>
 );
+// 컨설팅 슬롯 = 일자(+시간). 시간이 없으면 하루 단위.
+const slotsOf = (T) => T.slots || (T.dates || []).map((date) => ({ date, time: "" }));
+const slotKey = (x) => x.time ? `${x.date} ${x.time}` : x.date;
+const slotShort = (x) => `${Number(x.date.slice(8))}일${x.time ? " " + x.time : ""}`;
+const slotLong = (x) => `${x.date.slice(5).replace(".", "월 ")}일${x.time ? " " + x.time : ""}`;
+const periodOf = (T) => { const ss = slotsOf(T); return ss.length ? `${ss[0].date} – ${ss[ss.length - 1].date.slice(5)}` : "일정 미정"; };
+const sameSlot = (a, b) => a.date === b.date && (a.time || "") === (b.time || "");
 const dueFix = () => { const d = new Date(); d.setDate(d.getDate() + FIX_DAYS); return d.toISOString().slice(0, 10); };
 
 /* ─────────── 소품 ─────────── */
@@ -691,23 +698,24 @@ function AdminConsult({ db, reload, say, log }) {
   const avail = db.avail.filter((a) => a.type === type);
   const confirms = db.confirms.filter((c) => c.type === type);
   const orgIds = [...new Set(avail.map((a) => a.orgId))];
-  const countOn = (date) => confirms.filter((c) => c.date === date).length;
+  const slots = slotsOf(T);
+  const countOn = (x) => confirms.filter((c) => sameSlot(c, x)).length;
 
   const confirm = async (orgId) => {
-    const date = pick[orgId] ?? confirms.find((c) => c.orgId === orgId)?.date
-      ?? avail.find((a) => a.orgId === orgId)?.date;
-    if (!date) { say("가능 일자가 없습니다."); return; }
+    const key = pick[orgId] ?? [confirms.find((c) => c.orgId === orgId), avail.find((a) => a.orgId === orgId)].filter(Boolean).map(slotKey)[0];
+    const x = slots.find((z) => slotKey(z) === key) || avail.find((a) => a.orgId === orgId && slotKey(a) === key);
+    if (!x) { say("가능 일시가 없습니다."); return; }
     const already = confirms.find((c) => c.orgId === orgId);
-    if (!already && countOn(date) >= CAP) {
-      say(`${date.slice(5)}은(는) 정원 ${CAP}개 기관이 모두 찼습니다. 다른 일자를 선택해 주세요.`); return;
+    if (!(already && sameSlot(already, x)) && countOn(x) >= CAP) {
+      say(`${slotShort(x)}은(는) 정원 ${CAP}개 기관이 모두 찼습니다. 다른 일시를 선택해 주세요.`); return;
     }
     try {
-      await run(sb.from("confirms").upsert({ org_id: orgId, type, date: iso(date) }));
-      await run(sb.from("alerts").insert({ org_id: orgId, text: `${T.label} 일정이 ${date.slice(5).replace(".", "월 ")}일로 확정되었습니다.` }));
-      await log("컨설팅 일정 확정", `${orgOf(orgId).name} · ${T.label} ${date.slice(5)}`);
+      await run(sb.from("confirms").upsert({ org_id: orgId, type, date: iso(x.date), time: x.time || "" }));
+      await run(sb.from("alerts").insert({ org_id: orgId, text: `${T.label} 일정이 ${slotLong(x)}로 확정되었습니다.` }));
+      await log("컨설팅 일정 확정", `${orgOf(orgId).name} · ${T.label} ${slotShort(x)}`);
     } catch (e) { say(`처리 실패: ${e.message}`); return; }
     reload();
-    say(`확정했습니다 — ${orgOf(orgId).name} · ${date.slice(5)}`);
+    say(`확정했습니다 — ${orgOf(orgId).name} · ${slotShort(x)}`);
   };
 
   const saveZoom = async (orgId) => {
@@ -746,29 +754,31 @@ function AdminConsult({ db, reload, say, log }) {
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="chd"><h3>{T.label} <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{T.period}</span></h3>
-          <span className="bg g-rev" style={{ fontSize: 10.5 }}>일자별 정원 {CAP}개 기관 · 1회 60분</span></div>
-        <div style={{ display: "flex", gap: 10, padding: 16 }}>
-          {T.dates.map((d) => {
-            const n = countOn(d);
-            return (
-              <div key={d} className="card" style={{ flex: 1, padding: 12, background: n >= CAP ? "var(--gray)" : "#FCFDFF" }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{Number(d.slice(8))}일</div>
-                <div style={{ fontSize: 10.5, color: "var(--ink3)", marginBottom: 8 }}>{d.slice(0, 7)}</div>
-                <div style={{ fontSize: 11, color: n >= CAP ? "var(--redT)" : "var(--ink2s)" }}>
-                  확정 {n}/{CAP}{n >= CAP && " · 마감"}
-                </div>
-                <div style={{ fontSize: 10.5, color: "var(--ink3)", marginTop: 4 }}>
-                  체크 {avail.filter((a) => a.date === d).length}개 기관
-                </div>
-                {confirms.filter((c) => c.date === d).map((c) => (
-                  <div key={c.orgId} className="bg g-app" style={{ fontSize: 10, marginTop: 5, display: "block" }}>
-                    {orgOf(c.orgId).name}
+        <div className="chd"><h3>{T.label} <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{periodOf(T)}</span></h3>
+          <span className="bg g-rev" style={{ fontSize: 10.5 }}>일시별 정원 {CAP}개 기관 · 1회 60분</span></div>
+        <div style={{ display: "flex", gap: 10, padding: 16, flexWrap: "wrap" }}>
+          {slots.length === 0 && <div style={{ fontSize: 12, color: "var(--ink3)" }}>사업 설정에서 이 회차의 일시를 먼저 등록해 주세요.</div>}
+          {[...new Set(slots.map((x) => x.date))].map((d) => (
+            <div key={d} className="card" style={{ flex: "1 1 160px", padding: 12, background: "#FCFDFF" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700 }}>{Number(d.slice(8))}일</div>
+              <div style={{ fontSize: 10.5, color: "var(--ink3)", marginBottom: 8 }}>{d.slice(0, 7)}</div>
+              {slots.filter((x) => x.date === d).map((x) => {
+                const n = countOn(x);
+                return (
+                  <div key={slotKey(x)} style={{ marginBottom: 7, paddingTop: 6, borderTop: "1px solid var(--line2)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                      <b className="mono">{x.time || "종일"}</b>
+                      <span style={{ color: n >= CAP ? "var(--redT)" : "var(--ink2s)" }}>확정 {n}/{CAP}{n >= CAP && " · 마감"}</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>체크 {avail.filter((a) => sameSlot(a, x)).length}개 기관</div>
+                    {confirms.filter((c) => sameSlot(c, x)).map((c) => (
+                      <div key={c.orgId} className="bg g-app" style={{ fontSize: 10, marginTop: 4, display: "block" }}>{orgOf(c.orgId).name}</div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -776,27 +786,26 @@ function AdminConsult({ db, reload, say, log }) {
         <div className="chd"><h3>기관별 일정 신청</h3>
           <span style={{ fontSize: 11, color: "var(--ink3)" }}>{orgIds.length}개 기관 신청 · {confirms.length}건 확정</span></div>
         <table>
-          <thead><tr><th style={{ width: 110 }}>기관</th><th>가능 일자 (체크)</th><th style={{ width: 78 }}>상태</th>
-            <th style={{ width: 150 }}>일정 확정</th><th style={{ width: 250 }}>Zoom 링크 / 안내 메일</th></tr></thead>
+          <thead><tr><th style={{ width: 110 }}>기관</th><th>가능 일시 (체크)</th><th style={{ width: 78 }}>상태</th>
+            <th style={{ width: 190 }}>일정 확정</th><th style={{ width: 250 }}>Zoom 링크 / 안내 메일</th></tr></thead>
           <tbody>
             {orgIds.map((oid) => {
               const o = orgOf(oid);
-              const ds = avail.filter((a) => a.orgId === oid).map((a) => a.date);
+              const ds = avail.filter((a) => a.orgId === oid);
               const cf = confirms.find((c) => c.orgId === oid);
               const failed = db.mailFails.some((f) => f.orgId === oid);
               return (
                 <tr key={oid}>
                   <td><b style={{ fontWeight: 500, color: cf ? "var(--greenT)" : "var(--ink)" }}>{o.name}</b></td>
                   <td style={{ fontSize: 11.5, color: "var(--brand2)" }}>
-                    {ds.map((d) => <span key={d} className="bg g-rev" style={{ marginRight: 4, fontSize: 10.5 }}>
-                      {Number(d.slice(8))}일</span>)}
+                    {ds.map((x) => <span key={slotKey(x)} className="bg g-rev" style={{ marginRight: 4, fontSize: 10.5 }}>{slotShort(x)}</span>)}
                   </td>
                   <td>{cf ? <span className="bg g-app">확정</span> : <span className="bg g-rev">신청 완료</span>}</td>
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <select style={{ width: 82, padding: "5px 7px" }} value={pick[oid] ?? cf?.date ?? ds[0]}
+                      <select style={{ width: 120, padding: "5px 7px" }} value={pick[oid] ?? (cf ? slotKey(cf) : slotKey(ds[0]))}
                         onChange={(e) => setPick({ ...pick, [oid]: e.target.value })}>
-                        {ds.map((d) => <option key={d} value={d}>{Number(d.slice(8))}일</option>)}
+                        {ds.map((x) => <option key={slotKey(x)} value={slotKey(x)}>{slotShort(x)}</option>)}
                       </select>
                       <button className="b2 bs" onClick={() => confirm(oid)}>{cf ? "변경" : "확정"}</button>
                     </div>
@@ -856,25 +865,27 @@ function AdminConsult({ db, reload, say, log }) {
 function OrgConsult({ db, reload, say, log, me }) {
   const [type, setType] = useState("h2");
   const T = CONSULT_TYPES.find((t) => t.key === type);
-  const mine = db.avail.filter((a) => a.orgId === me.id && a.type === type).map((a) => a.date);
+  const mine = db.avail.filter((a) => a.orgId === me.id && a.type === type).map(slotKey);
   const [picks, setPicks] = useState(mine);
+  const slots = slotsOf(T);
   const cf = db.confirms.find((c) => c.orgId === me.id && c.type === type);
   const pre = db.pre[me.id] || { rate: "", progress: "", country: "", ask: "" };
   const [form, setForm] = useState(pre);
   const [errs, setErrs] = useState({});
 
   useEffect(() => {
-    setPicks(db.avail.filter((a) => a.orgId === me.id && a.type === type).map((a) => a.date));
+    setPicks(db.avail.filter((a) => a.orgId === me.id && a.type === type).map(slotKey));
   }, [type, me.id]);
 
   const toggle = (d) => setPicks((p) => p.includes(d) ? p.filter((x) => x !== d) : [...p, d]);
 
   const save = async () => {
-    if (!picks.length) { say("가능한 일자를 최소 1개 이상 체크해 주세요."); return; }
+    if (!picks.length) { say("가능한 일시를 최소 1개 이상 체크해 주세요."); return; }
+    const chosen = slots.filter((x) => picks.includes(slotKey(x)));
     try {
       await run(sb.from("avail").delete().match({ org_id: me.id, type }));
-      await run(sb.from("avail").insert(picks.map((date) => ({ org_id: me.id, type, date: iso(date) }))));
-      await log("컨설팅 가능일자 제출", `${T.label} · ${picks.map((d) => d.slice(8)).join(", ")}일`);
+      await run(sb.from("avail").insert(chosen.map((x) => ({ org_id: me.id, type, date: iso(x.date), time: x.time || "" }))));
+      await log("컨설팅 가능일시 제출", `${T.label} · ${chosen.map(slotShort).join(", ")}`);
     } catch (e) { say(`처리 실패: ${e.message}`); return; }
     reload();
     say("가능 일자를 제출했습니다. 사무국 확정 후 최종 일정이 안내됩니다.");
@@ -911,7 +922,7 @@ function OrgConsult({ db, reload, say, log, me }) {
         <div className="card" style={{ padding: 22, marginBottom: 16, background: "var(--green)", borderColor: "#C6E3D2" }}>
           <div style={{ fontSize: 11.5, color: "var(--greenT)" }}>{T.label} 일정이 확정되었습니다</div>
           <div className="mono" style={{ fontSize: 24, fontWeight: 700, color: "var(--greenT)", marginTop: 4 }}>
-            {cf.date.slice(5).replace(".", "월 ")}일
+            {slotLong(cf)}
           </div>
           <div style={{ fontSize: 12, color: "var(--greenT)", marginTop: 6 }}>
             1회 60분 · 온라인 · {cf.zoom
@@ -922,27 +933,34 @@ function OrgConsult({ db, reload, say, log, me }) {
       ) : (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
-            <div className="chd"><h3>{T.label} <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{T.period}</span></h3>
-              <span className="bg g-rev" style={{ fontSize: 10.5 }}>가능한 일자를 모두 체크</span></div>
-            <div style={{ display: "flex", gap: 10, padding: 16 }}>
-              {T.dates.map((d) => {
-                const full = db.confirms.filter((c) => c.type === type && c.date === d).length >= CAP;
-                const on = picks.includes(d);
-                return (
-                  <div key={d} className={`dsel ${on ? "dsel-on" : ""} ${full ? "dsel-full" : ""}`}
-                    style={{ flex: 1 }} onClick={() => !full && toggle(d)}>
-                    <div style={{ fontSize: 15, fontWeight: 700 }}>{Number(d.slice(8))}</div>
-                    <div style={{ fontSize: 10.5 }}>{full ? "마감" : on ? "가능 ✓" : "선택"}</div>
-                  </div>
-                );
-              })}
+            <div className="chd"><h3>{T.label} <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{periodOf(T)}</span></h3>
+              <span className="bg g-rev" style={{ fontSize: 10.5 }}>가능한 일시를 모두 체크</span></div>
+            <div style={{ display: "flex", gap: 10, padding: 16, flexWrap: "wrap" }}>
+              {slots.length === 0 && <div style={{ fontSize: 12, color: "var(--ink3)" }}>아직 신청 가능한 일시가 없습니다. 사무국이 일정을 등록하면 표시됩니다.</div>}
+              {[...new Set(slots.map((x) => x.date))].map((d) => (
+                <div key={d} style={{ flex: "1 1 150px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{Number(d.slice(5, 7))}월 {Number(d.slice(8))}일</div>
+                  {slots.filter((x) => x.date === d).map((x) => {
+                    const k = slotKey(x);
+                    const full = db.confirms.filter((c) => c.type === type && sameSlot(c, x)).length >= CAP;
+                    const on = picks.includes(k);
+                    return (
+                      <div key={k} className={`dsel ${on ? "dsel-on" : ""} ${full ? "dsel-full" : ""}`}
+                        style={{ marginBottom: 6, padding: "8px 10px" }} onClick={() => !full && toggle(k)}>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{x.time || "종일"}</div>
+                        <div style={{ fontSize: 10.5 }}>{full ? "마감" : on ? "가능 ✓" : "선택"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
             <div style={{ padding: "0 16px 14px", fontSize: 11.5, color: "var(--ink2s)" }}>
-              여러 일자를 체크할수록 조율이 쉬워집니다. 정원이 찬 일자는 선택할 수 없습니다.
+              여러 일시를 체크할수록 조율이 쉬워집니다. 정원이 찬 일시는 선택할 수 없습니다.
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22 }}>
-            <button className="b1" onClick={save}>가능 일자 제출</button>
+            <button className="b1" onClick={save}>가능 일시 제출</button>
             <span style={{ fontSize: 11.5, color: "var(--ink2s)" }}>
               {picks.length}개 선택됨{mine.length ? " · 기존 제출 내역을 덮어씁니다" : ""}</span>
           </div>
@@ -1398,7 +1416,7 @@ function ExpertSubmit({ db, reload, say, log, me }) {
 
 function ExpertConsult({ db, reload, say, me }) {
   const [zoom, setZoom] = useState({});
-  const rows = db.confirms.slice().sort((a, b) => a.date.localeCompare(b.date));
+  const rows = db.confirms.slice().sort((a, b) => slotKey(a).localeCompare(slotKey(b)));
 
   const save = async (c) => {
     const url = (zoom[`${c.orgId}-${c.type}`] ?? c.zoom).trim();
@@ -1417,7 +1435,7 @@ function ExpertConsult({ db, reload, say, me }) {
         <div className="chd"><h3>확정 컨설팅 일정</h3>
           <span style={{ fontSize: 11, color: "var(--ink3)" }}>{rows.length}건 · 1회 60분</span></div>
         <table>
-          <thead><tr><th style={{ width: 110 }}>일자</th><th style={{ width: 140 }}>구분</th><th>기관</th>
+          <thead><tr><th style={{ width: 130 }}>일시</th><th style={{ width: 140 }}>구분</th><th>기관</th>
             <th style={{ width: 150 }}>기관 담당자</th><th style={{ width: 280 }}>비고 (Zoom 링크)</th></tr></thead>
           <tbody>
             {rows.map((c) => {
@@ -1426,7 +1444,7 @@ function ExpertConsult({ db, reload, say, me }) {
               const k = `${c.orgId}-${c.type}`;
               return (
                 <tr key={k}>
-                  <td className="mono"><b>{c.date.slice(5)}</b></td>
+                  <td className="mono"><b>{c.date.slice(5)}</b>{c.time && <> {c.time}</>}</td>
                   <td><span className="bg g-rev" style={{ fontSize: 10.5 }}>{T.label}</span></td>
                   <td><b style={{ fontWeight: 500 }}>{orgOf(c.orgId).name}</b>
                     {db.pre[c.orgId] && <div style={{ fontSize: 10.5, color: "var(--brand2)" }}>
@@ -1566,8 +1584,7 @@ function OrgDash({ db, reload, say, go, me, setKind }) {
           <h3 style={{ margin: "0 0 11px", fontSize: 13.5 }}>컨설팅</h3>
           {cf ? (
             <>
-              <div className="mono" style={{ fontSize: 19, fontWeight: 700, color: "var(--greenT)" }}>
-                {cf.date.slice(5).replace(".", "월 ")}일</div>
+              <div className="mono" style={{ fontSize: 19, fontWeight: 700, color: "var(--greenT)" }}>{slotLong(cf)}</div>
               <div style={{ fontSize: 11.5, color: "var(--ink2s)", marginTop: 4 }}>
                 {CONSULT_TYPES.find((t) => t.key === cf.type).label} · 1회 60분<br />
                 {cf.zoom ? `Zoom 링크 등록됨` : "Zoom 링크 대기 중"}
@@ -1615,6 +1632,7 @@ function OrgSubmit({ db, reload, say, log, me, kind, setKind, R }) {
   const isFix = s.status === "revision";
   const lastFb = [...s.feedbacks].reverse().find((f) => f.severity === "req");
   const locked = ["submitted", "reviewing", "approved"].includes(s.status);
+  const notYet = R.start && TODAY < R.start && s.status === "none";
 
   const submit = async (files) => {
     if (isFix && !note.trim()) { setErr("변경 사항 메모는 필수 입력입니다."); say("변경 사항을 입력해야 재제출할 수 있습니다."); return; }
@@ -1641,10 +1659,14 @@ function OrgSubmit({ db, reload, say, log, me, kind, setKind, R }) {
 
   return (
     <div>
-      <PageHead title="자료 제출" sub={`${R.label} · 제출 마감 ${R.due}`} right={<Badge s={s.status} />} />
+      <PageHead title="자료 제출" sub={`${R.label} · 제출 기간 ${R.start ? `${R.start} – ` : "~ "}${R.due}`} right={<Badge s={s.status} />} />
       <ReportTabs kind={kind} setKind={setKind} />
 
-      {locked ? (
+      {notYet ? (
+        <div className="card note" style={{ textAlign: "center", padding: 22, background: "var(--gray)", color: "var(--grayT)" }}>
+          {R.label} 제출은 {R.start}부터 가능합니다. (마감 {R.due})
+        </div>
+      ) : locked ? (
         <div className="card note" style={{ textAlign: "center", padding: 22,
           background: s.status === "approved" ? "var(--green)" : "var(--blue)",
           color: s.status === "approved" ? "var(--greenT)" : "var(--blueT)" }}>
@@ -2010,7 +2032,7 @@ function Settings({ db, reload, say, log }) {
   const init = () => {
     const c = currentSettings();
     return { ...c,
-      consult_types: c.consult_types.map((t) => ({ ...t, dates: t.dates.join(", ") })),
+      consult_types: c.consult_types.map((t) => ({ key: t.key, label: t.label, required: !!t.required, slots: slotsOf(t) })),
       notices: c.notices.map((n) => ({ t: n.t, d: n.d, body: n.body.join("\n\n"), ctaLabel: n.cta?.[0] || "", ctaPage: n.cta?.[1] || "" })) };
   };
   const [f, setF] = useState(init);
@@ -2026,18 +2048,20 @@ function Settings({ db, reload, say, log }) {
   const save = async () => {
     const e = [];
     if (!f.program.trim()) e.push("사업명");
-    f.reports.forEach((r, i) => { if (!r.label.trim()) e.push(`보고서 ${i + 1} 이름`); if (!D.test(r.due)) e.push(`보고서 ${i + 1} 마감 (YYYY.MM.DD)`); });
+    f.reports.forEach((r, i) => { if (!r.label.trim()) e.push(`보고서 ${i + 1} 이름`); if (!D.test(r.due)) e.push(`보고서 ${i + 1} 마감일`);
+      if (r.start && r.start > r.due) e.push(`보고서 ${i + 1} 시작일이 마감일보다 늦음`); });
     f.consult_types.forEach((t, i) => { if (!t.label.trim()) e.push(`컨설팅 ${i + 1} 이름`);
-      t.dates.split(",").map((s) => s.trim()).filter(Boolean).forEach((d) => { if (!D.test(d)) e.push(`컨설팅 ${i + 1} 일자 "${d}"`); }); });
+      t.slots.forEach((x) => { if (!D.test(x.date)) e.push(`컨설팅 ${i + 1} 일자`); }); });
     f.expert_reports.forEach((r, i) => { if (!r.label.trim()) e.push(`전문가 보고서 ${i + 1} 이름`); if (!D.test(r.due)) e.push(`전문가 보고서 ${i + 1} 마감`); });
     f.notices.forEach((n, i) => { if (!n.t.trim()) e.push(`공지 ${i + 1} 제목`); });
     if (e.length) { say(`확인 필요: ${e.slice(0, 3).join(", ")}${e.length > 3 ? " 외" : ""}`); return; }
     const data = {
       program: f.program.trim(), team: f.team.trim(), program_year: Number(f.program_year),
-      reports: f.reports.map((r) => ({ key: r.key, label: r.label.trim(), due: r.due })),
+      reports: f.reports.map((r) => ({ key: r.key, label: r.label.trim(), start: r.start || "", due: r.due })),
       fix_days: Number(f.fix_days) || 7, cap: Number(f.cap) || 2,
-      consult_types: f.consult_types.map((t) => ({ key: t.key, label: t.label.trim(), period: t.period.trim(), required: !!t.required,
-        dates: t.dates.split(",").map((s) => s.trim()).filter(Boolean).sort() })),
+      consult_types: f.consult_types.map((t) => ({ key: t.key, label: t.label.trim(), required: !!t.required,
+        slots: t.slots.map((x) => ({ date: x.date, time: x.time || "" })).filter((x, i, arr) => arr.findIndex((y) => sameSlot(x, y)) === i)
+          .sort((a, b) => slotKey(a).localeCompare(slotKey(b))) })),
       expert_reports: f.expert_reports.map((r) => ({ key: r.key, label: r.label.trim(), due: r.due })),
       notices: f.notices.map((n) => ({ t: n.t.trim(), d: n.d, by: f.team.trim(), body: n.body.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean),
         cta: n.ctaPage ? [n.ctaLabel || "바로가기 →", n.ctaPage] : null })),
@@ -2062,7 +2086,7 @@ function Settings({ db, reload, say, log }) {
           <div><label className="lbl">운영 부서명 (문구·메일 서명)</label><IN value={f.team} onChange={(e) => up("team", e.target.value)} /></div>
           <div><label className="lbl">사업연도 (이 해에 선발된 기관 = 1차년도)</label><IN type="number" value={f.program_year} onChange={(e) => up("program_year", e.target.value)} /></div>
           <div><label className="lbl">수정 요청 시 부여 기한 (일)</label><IN type="number" value={f.fix_days} onChange={(e) => up("fix_days", e.target.value)} /></div>
-          <div><label className="lbl">컨설팅 일자별 확정 정원 (기관 수)</label><IN type="number" value={f.cap} onChange={(e) => up("cap", e.target.value)} /></div>
+          <div><label className="lbl">컨설팅 일시별 확정 정원 (기관 수)</label><IN type="number" value={f.cap} onChange={(e) => up("cap", e.target.value)} /></div>
         </div>
       </div>
 
@@ -2070,12 +2094,13 @@ function Settings({ db, reload, say, log }) {
         <div className="chd"><h3>기관 제출 보고서</h3>
           <button className="b2 bs" onClick={() => up("reports", [...f.reports, { key: newKey("p"), label: "", due: "" }])}>+ 보고서 추가</button></div>
         <table>
-          <thead><tr><th>이름</th><th style={{ width: 170 }}>제출 마감 (YYYY.MM.DD)</th><th style={{ width: 70 }} /></tr></thead>
+          <thead><tr><th>이름</th><th style={{ width: 170 }}>제출 시작일 (선택)</th><th style={{ width: 170 }}>제출 마감일</th><th style={{ width: 70 }} /></tr></thead>
           <tbody>
             {f.reports.map((r, i) => (
               <tr key={r.key}>
                 <td><IN value={r.label} placeholder="중간보고서" onChange={(e) => upRow("reports", i, { label: e.target.value })} /></td>
-                <td><IN value={r.due} placeholder="2027.09.18" onChange={(e) => upRow("reports", i, { due: e.target.value })} /></td>
+                <td><IN type="date" value={r.start ? iso(r.start) : ""} onChange={(e) => upRow("reports", i, { start: fmt(e.target.value) })} /></td>
+                <td><IN type="date" value={r.due ? iso(r.due) : ""} onChange={(e) => upRow("reports", i, { due: fmt(e.target.value) })} /></td>
                 <td style={{ textAlign: "right" }}>
                   {usedKinds.has(r.key) || f.reports.length === 1 ? <span style={{ fontSize: 10.5, color: "var(--ink3)" }}>{usedKinds.has(r.key) ? "제출 있음" : ""}</span>
                     : <button className="b2 bs" onClick={() => delRow("reports", i)}>삭제</button>}
@@ -2085,32 +2110,42 @@ function Settings({ db, reload, say, log }) {
           </tbody>
         </table>
         <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--ink3)", borderTop: "1px solid var(--line2)" }}>
-          기관 화면의 자료 제출 탭이 이 순서대로 생깁니다. 이미 제출된 보고서 종류는 삭제할 수 없습니다.
+          기관 화면의 자료 제출 탭이 이 순서대로 생깁니다. 시작일을 넣으면 그날부터 제출할 수 있고, 비우면 바로 제출 가능합니다. 이미 제출된 보고서 종류는 삭제할 수 없습니다.
         </div>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="chd"><h3>컨설팅 회차</h3>
-          <button className="b2 bs" onClick={() => up("consult_types", [...f.consult_types, { key: newKey("c"), label: "", period: "", required: true, dates: "" }])}>+ 회차 추가</button></div>
-        <table>
-          <thead><tr><th style={{ width: 200 }}>이름</th><th style={{ width: 170 }}>기간 표시</th><th>가능 일자 (쉼표로 구분, YYYY.MM.DD)</th><th style={{ width: 60 }}>필수</th><th style={{ width: 70 }} /></tr></thead>
-          <tbody>
-            {f.consult_types.map((t, i) => (
-              <tr key={t.key}>
-                <td><IN value={t.label} placeholder="하반기 필수컨설팅" onChange={(e) => upRow("consult_types", i, { label: e.target.value })} /></td>
-                <td><IN value={t.period} placeholder="2027.09.21 – 09.25" onChange={(e) => upRow("consult_types", i, { period: e.target.value })} /></td>
-                <td><IN value={t.dates} placeholder="2027.09.21, 2027.09.22" onChange={(e) => upRow("consult_types", i, { dates: e.target.value })} /></td>
-                <td style={{ textAlign: "center" }}><input type="checkbox" style={{ width: "auto" }} checked={!!t.required} onChange={(e) => upRow("consult_types", i, { required: e.target.checked })} /></td>
-                <td style={{ textAlign: "right" }}>
-                  {usedTypes.has(t.key) ? <span style={{ fontSize: 10.5, color: "var(--ink3)" }}>신청 있음</span>
-                    : <button className="b2 bs" onClick={() => delRow("consult_types", i)}>삭제</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          <button className="b2 bs" onClick={() => up("consult_types", [...f.consult_types, { key: newKey("c"), label: "", required: true, slots: [] }])}>+ 회차 추가</button></div>
+        {f.consult_types.map((t, i) => {
+          const setSlots = (slots) => upRow("consult_types", i, { slots });
+          return (
+            <div key={t.key} style={{ padding: 16, borderBottom: "1px solid var(--line2)" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                <IN style={{ flex: 1 }} value={t.label} placeholder="회차 이름 (예: 하반기 필수컨설팅)" onChange={(e) => upRow("consult_types", i, { label: e.target.value })} />
+                <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+                  <input type="checkbox" style={{ width: "auto" }} checked={!!t.required} onChange={(e) => upRow("consult_types", i, { required: e.target.checked })} />필수</label>
+                {usedTypes.has(t.key) ? <span style={{ fontSize: 10.5, color: "var(--ink3)", whiteSpace: "nowrap" }}>신청 있음</span>
+                  : <button className="b2 bs" onClick={() => delRow("consult_types", i)}>회차 삭제</button>}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--ink3)", marginBottom: 6 }}>가능 일시 — 시간을 비우면 하루 단위로 신청받습니다</div>
+              {t.slots.map((x, j) => (
+                <div key={j} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
+                  <IN type="date" style={{ width: 170 }} value={x.date ? iso(x.date) : ""} onChange={(e) => setSlots(t.slots.map((y, k) => (k === j ? { ...y, date: fmt(e.target.value) } : y)))} />
+                  <IN type="time" style={{ width: 130 }} value={x.time || ""} onChange={(e) => setSlots(t.slots.map((y, k) => (k === j ? { ...y, time: e.target.value } : y)))} />
+                  <button className="b2 bs" onClick={() => setSlots(t.slots.filter((_, k) => k !== j))}>삭제</button>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="b2 bs" onClick={() => setSlots([...t.slots, { date: t.slots[t.slots.length - 1]?.date || "", time: "" }])}>+ 일시 추가</button>
+                {t.slots.length > 0 && <button className="b2 bs" onClick={() => { const last = t.slots[t.slots.length - 1]; const d = new Date(iso(last.date)); d.setDate(d.getDate() + 1);
+                  setSlots([...t.slots, ...t.slots.filter((y) => y.date === last.date).map((y) => ({ ...y, date: fmt(d) }))]); }}>+ 다음 날 같은 시간으로</button>}
+              </div>
+            </div>
+          );
+        })}
         <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--ink3)", borderTop: "1px solid var(--line2)" }}>
-          기관이 이미 가능 일자를 신청한 회차는 삭제할 수 없습니다. 일자를 줄이면 그 일자의 신청 내역은 화면에서 사라집니다.
+          기관이 이미 가능 일시를 신청한 회차는 삭제할 수 없습니다. 일시를 지우면 그 일시의 신청 내역은 화면에서 사라집니다.
         </div>
       </div>
 

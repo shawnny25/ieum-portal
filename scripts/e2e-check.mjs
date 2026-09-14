@@ -65,7 +65,7 @@ try {
   await admin.from("profiles").update({ org_id: other.id }).eq("id", u.user.id);
   const { data: s2 } = await org.from("submissions").select("*");
   assert.equal(s2.length, 0);
-  assert((await org.from("avail").insert({ org_id: other.id, type: "h2", date: "2026-09-21" })).error); ok("만료 기관은 읽기·쓰기 모두 차단");
+  assert((await org.from("avail").insert({ org_id: other.id, type: "h2", date: "2026-09-21", time: "10:00" })).error); ok("만료 기관은 읽기·쓰기 모두 차단");
 
   console.log("\n모든 검증 통과");
 } finally {

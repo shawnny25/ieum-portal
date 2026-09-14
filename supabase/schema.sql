@@ -266,3 +266,8 @@ alter table versions add column kind text not null default 'mid';
 alter table versions drop constraint versions_org_id_no_key;
 alter table versions add unique (org_id, kind, no);
 alter table feedbacks add column kind text not null default 'mid';
+n-- ───────── 컨설팅 시간 슬롯 (2026-09-14 추가) ─────────
+alter table avail drop constraint avail_pkey;
+alter table avail add column time text not null default '';
+alter table avail add primary key (org_id, type, date, time);
+alter table confirms add column time text not null default '';
