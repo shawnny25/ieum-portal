@@ -12,14 +12,12 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 
 남은 것 (비밀값이라 직접):
 
-1. **메일 발송용 Gmail** — 팀 Gmail 계정에서 [앱 비밀번호](https://myaccount.google.com/apppasswords) 발급(2단계 인증 필요) 후:
+1. **메일 발송 계정 (sionlee@ngokcoc.or.kr)** — 그 메일이 Google Workspace 면 [앱 비밀번호](https://myaccount.google.com/apppasswords) 발급(2단계 인증 필요). 다른 메일 서비스면 그쪽 SMTP 호스트·포트·비밀번호.
    ```bash
-   npx vercel env add GMAIL_USER production
+   npx vercel env add SMTP_PASS production
    ```
-   ```bash
-   npx vercel env add GMAIL_APP_PASSWORD production
-   ```
-   그리고 Supabase → Authentication → Emails → SMTP Settings 에도 같은 값 (Host `smtp.gmail.com`, Port `465`).
+   (SMTP_USER, SMTP_HOST, SMTP_PORT, MAIL_FROM 은 이미 등록됨. Gmail 이 아니면 `npx vercel env rm SMTP_HOST production` 후 다시 add)
+   그리고 Supabase → Authentication → Emails → SMTP Settings 에도 같은 값.
    없으면: Zoom 안내 메일은 "발송 실패"로 남고, 비밀번호 재설정 메일은 시간당 2통 제한.
 2. **R2 (선택)** — Cloudflare 이메일 확인 후 R2 → Manage API Tokens → Create (Object Read & Write). Access Key ID / Secret 을 `.env.local` 의 `R2_*` 에 넣고 `NEXT_PUBLIC_R2=1`, 그 다음:
    ```bash
