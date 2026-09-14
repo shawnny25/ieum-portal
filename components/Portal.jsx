@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { sb } from "@/lib/supabase/client";
 import { loadDb, run, uploadFiles, download } from "@/lib/db";
-import { PROGRAM, TEAM, CUR_YEAR, REPORTS, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
+import { PROGRAM, TEAM, CUR_YEAR, MAIL_VARS, MAIL_SUBJECT, MAIL_BODY, fillMail, REPORTS, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
   CONSULT_TYPES, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb, currentSettings } from "@/lib/config";
 
 /* ══════════════════════════════════════════════════════════
@@ -718,27 +718,32 @@ function AdminConsult({ db, reload, say, log }) {
     say(`확정했습니다 — ${orgOf(orgId).name} · ${slotShort(x)}`);
   };
 
-  const saveZoom = async (orgId) => {
-    const url = (zoom[orgId] ?? db.confirms.find((c) => c.orgId === orgId && c.type === type)?.zoom ?? "").trim();
+  // 발송 전 미리보기 → 확인 후 send()
+  const [preview, setPreview] = useState(null);   // { orgId, url, subject, body, to, retry }
+  const [sending, setSending] = useState(false);
+  const zoomOf = (orgId) => (zoom[orgId] ?? db.confirms.find((c) => c.orgId === orgId && c.type === type)?.zoom ?? "").trim();
+  const openPreview = (orgId, retry) => {
+    const url = zoomOf(orgId);
     if (!url) { say("Zoom 링크를 입력해 주세요."); return; }
     if (!/^https?:\/\//.test(url)) { say("http:// 또는 https:// 로 시작하는 주소를 입력해 주세요."); return; }
-    const mgr = db.managers[orgId];
-    const r = await fetch("/api/zoom", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orgId, type, zoom: url }) }).then((x) => x.json());
-    if (r.error) { say(`처리 실패: ${r.error}`); return; }
-    if (r.ok) await run(sb.from("alerts").insert({ org_id: orgId, text: `${T.label} Zoom 링크가 등록되었습니다. 담당자 이메일로 안내가 발송되었습니다.` }));
-    await log(r.ok ? "Zoom 링크 등록 · 메일 발송" : "안내 메일 발송 실패", `${orgOf(orgId).name} → ${mgr.email}`);
-    reload();
-    say(r.ok ? `Zoom 링크를 저장하고 ${mgr.name} ${mgr.title}(${mgr.email})에게 안내를 발송했습니다.`
-      : `Zoom 링크는 저장했지만 메일 발송에 실패했습니다 (${r.reason}). 재시도 버튼으로 다시 보낼 수 있습니다.`);
+    const o = orgOf(orgId), mgr = db.managers[orgId], cf = confirms.find((c) => c.orgId === orgId);
+    const v = { "{기관명}": o.name, "{담당자}": `${mgr.name} ${mgr.title}`.trim(), "{차년도}": String(o.year), "{회차}": T.label,
+      "{일시}": cf ? slotKey(cf) : "(미확정)", "{링크}": url, "{부서}": TEAM, "{사업명}": PROGRAM };
+    setPreview({ orgId, url, retry, to: mgr.email, subject: fillMail(MAIL_SUBJECT, v), body: fillMail(MAIL_BODY, v) });
   };
-
-  const retry = async (orgId) => {
+  const saveZoom = (orgId) => openPreview(orgId, false);
+  const retry = (orgId) => openPreview(orgId, true);
+  const send = async () => {
+    const { orgId, url, retry: isRetry, to } = preview;
+    setSending(true);
     const r = await fetch("/api/zoom", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orgId, type }) }).then((x) => x.json());
-    if (r.ok) await log("안내 메일 재발송", `${orgOf(orgId).name}`);
+      body: JSON.stringify({ orgId, type, zoom: url }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+    setSending(false); setPreview(null);
+    if (r.error) { say(`처리 실패: ${r.error}`); return; }
+    if (r.ok && !isRetry) await run(sb.from("alerts").insert({ org_id: orgId, text: `${T.label} Zoom 링크가 등록되었습니다. 담당자 이메일로 안내가 발송되었습니다.` }));
+    await log(r.ok ? (isRetry ? "안내 메일 재발송" : "Zoom 링크 등록 · 메일 발송") : "안내 메일 발송 실패", `${orgOf(orgId).name} → ${to}`);
     reload();
-    say(r.ok ? "재발송했습니다." : `발송 실패: ${r.reason || r.error}`);
+    say(r.ok ? `${to}로 안내 메일을 발송했습니다.` : `Zoom 링크는 저장했지만 메일 발송에 실패했습니다 (${r.reason}). 재시도 버튼으로 다시 보낼 수 있습니다.`);
   };
 
   return (
@@ -856,6 +861,25 @@ function AdminConsult({ db, reload, say, log }) {
             </div>
           ))}
       </div>
+
+      {preview && (
+        <div className="mask" onClick={() => !sending && setPreview(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div style={{ padding: "18px 20px 6px" }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>{preview.retry ? "안내 메일 재발송" : "안내 메일 발송"} 전 확인</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink2s)", marginTop: 3 }}>받는 사람 <b style={{ color: "var(--brand2)" }}>{preview.to}</b> · 문구는 사업 설정에서 바꿀 수 있습니다.</div>
+            </div>
+            <div style={{ padding: "8px 20px" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 12px", background: "var(--gray)", borderRadius: 6 }}>{preview.subject}</div>
+              <div style={{ whiteSpace: "pre-wrap", fontSize: 12.5, lineHeight: 1.8, padding: "12px 12px", border: "1px solid var(--line)", borderRadius: 6, marginTop: 8, maxHeight: 360, overflow: "auto" }}>{preview.body}</div>
+            </div>
+            <div style={{ padding: "8px 20px 18px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="b2" disabled={sending} onClick={() => setPreview(null)}>취소</button>
+              <button className="b1" disabled={sending} onClick={send}>{sending ? "발송 중…" : "발송"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2065,6 +2089,7 @@ function Settings({ db, reload, say, log }) {
       expert_reports: f.expert_reports.map((r) => ({ key: r.key, label: r.label.trim(), due: r.due })),
       notices: f.notices.map((n) => ({ t: n.t.trim(), d: n.d, by: f.team.trim(), body: n.body.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean),
         cta: n.ctaPage ? [n.ctaLabel || "바로가기 →", n.ctaPage] : null })),
+      mail_subject: f.mail_subject.trim(), mail_body: f.mail_body.trim(),
     };
     setBusy(true);
     try {
@@ -2167,6 +2192,20 @@ function Settings({ db, reload, say, log }) {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="chd"><h3>컨설팅 확정 안내 메일</h3>
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>Zoom 링크 저장·발송 시 담당자에게 가는 메일</span></div>
+        <div style={{ padding: 16 }}>
+          <label className="lbl">제목</label>
+          <IN value={f.mail_subject} onChange={(e) => up("mail_subject", e.target.value)} />
+          <label className="lbl" style={{ marginTop: 12 }}>본문</label>
+          <textarea rows={14} value={f.mail_body} onChange={(e) => up("mail_body", e.target.value)} style={{ fontFamily: "inherit" }} />
+          <div style={{ fontSize: 11, color: "var(--ink3)", marginTop: 8, lineHeight: 1.8 }}>
+            아래 표시는 발송할 때 실제 값으로 바뀝니다: {MAIL_VARS.map((k) => <code key={k} style={{ margin: "0 3px", background: "var(--gray)", padding: "1px 5px", borderRadius: 4 }}>{k}</code>)}
+          </div>
+        </div>
       </div>
 
       <div className="card">
