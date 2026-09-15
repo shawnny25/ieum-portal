@@ -36,6 +36,34 @@ node --env-file=.env.local scripts/restore.mjs ieum-2026-09-14.json
 node --env-file=.env.local scripts/e2e-check.mjs
 ```
 
+## 다른 기기에서 이어서 작업하기
+
+코드는 GitHub 에 다 있고, 비밀값(.env.local)은 git 에 없다. 비밀값은 Vercel 에 전부 등록돼 있으니 거기서 내려받는다.
+Node.js 20 이상과 git 만 있으면 된다.
+
+```bash
+git clone https://github.com/shawnny25/ieum-portal.git
+```
+```bash
+cd ieum-portal && npm install
+```
+```bash
+npx vercel login
+```
+```bash
+npx vercel link --yes --project ieum-portal
+```
+```bash
+npx vercel env pull .env.local --environment=production
+```
+```bash
+npm run dev
+```
+
+- `vercel login` 은 브라우저에서 승인 한 번. GitHub 저장소는 비공개라 clone 때 GitHub 로그인이 필요하다.
+- Supabase 원격 SQL·설정 push 를 쓰려면 `npx supabase login` 도 한 번 (선택).
+- 작업 후 `git push` 하면 Vercel 이 자동 배포한다. 두 기기에서 번갈아 작업할 때는 시작 전에 `git pull`.
+
 ## 1. Supabase 설정 (한 번만)
 
 1. https://supabase.com/dashboard → **New project** (리전: Northeast Asia (Seoul))
