@@ -292,3 +292,10 @@ drop policy if exists exp_upd on confirms;
 
 -- ───────── 확정 일정 담당 전문가 (2026-09-16 추가) ─────────
 alter table confirms add column expert_id uuid references profiles on delete set null;
+
+-- ───────── 전문가는 본인 배정 일정·담당 기관 사전 정보만 조회 (2026-09-16 추가) ─────────
+drop policy if exists exp_sel on confirms;
+create policy exp_sel on confirms for select to authenticated using (is_expert() and expert_id = auth.uid());
+drop policy if exists exp_sel on pre;
+create policy exp_sel on pre for select to authenticated
+  using (is_expert() and exists (select 1 from confirms c where c.org_id = pre.org_id and c.expert_id = auth.uid()));
