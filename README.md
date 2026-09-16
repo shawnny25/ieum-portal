@@ -36,6 +36,14 @@ node --env-file=.env.local scripts/restore.mjs ieum-2026-09-14.json
 node --env-file=.env.local scripts/e2e-check.mjs
 ```
 
+### 컨설팅 일정 흐름 변경 (2026-09-16, 미배포)
+
+전문가 가능 일시를 먼저 조사하고 그중에서 기관에 열 일시를 고르는 2단계 흐름. 반영 순서:
+1. Supabase SQL Editor 에서 `supabase/schema.sql` 맨 아래 "전문가 컨설팅 가능 일시" 블록만 실행 (`expert_avail` 테이블 + 전문가의 confirms 수정 권한 제거)
+2. `git pull` 후 push → Vercel 자동 배포
+3. 관리자 → 컨설팅 일정 → "1단계 · 전문가 가능 일시" 카드에서 기관에 열 일시 체크 → "기관 접수 시작"
+   (기존 회차는 호환을 위해 "기관 접수 중" 상태로 시작한다. 전문가 조사부터 다시 하려면 "접수 닫기")
+
 ## 다른 기기에서 이어서 작업하기
 
 코드는 GitHub 에 다 있고, 비밀값(.env.local)은 git 에 없다. 비밀값은 Vercel 에 전부 등록돼 있으니 거기서 내려받는다.
