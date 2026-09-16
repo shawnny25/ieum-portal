@@ -289,3 +289,6 @@ create policy exp_rw on expert_avail for all to authenticated
   using (is_expert() and expert_id = auth.uid()) with check (is_expert() and expert_id = auth.uid());
 -- 확정 일정은 관리자만 변경: 전문가의 confirms 수정(zoom 비고) 권한 제거
 drop policy if exists exp_upd on confirms;
+
+-- ───────── 확정 일정 담당 전문가 (2026-09-16 추가) ─────────
+alter table confirms add column expert_id uuid references profiles on delete set null;
