@@ -29,10 +29,28 @@ const ReportTabs = ({ kind, setKind }) => (
 // 컨설팅 슬롯 = 일자(+시간). 시간이 없으면 하루 단위.
 const slotsOf = (T) => T.slots || (T.dates || []).map((date) => ({ date, time: "" }));
 const slotKey = (x) => x.time ? `${x.date} ${x.time}` : x.date;
-const slotShort = (x) => `${Number(x.date.slice(8))}일${x.time ? " " + x.time : ""}`;
-const slotLong = (x) => `${x.date.slice(5).replace(".", "월 ")}일${x.time ? " " + x.time : ""}`;
+// 컨설팅 1건 소요 시간(분). 회차별 설정(dur), 없으면 120분
+const durOf = (T) => Number(T?.dur) || 120;
+const typeOf = (key) => CONSULT_TYPES.find((t) => t.key === key);
+const addMin = (hhmm, m) => { const [h, mi] = hhmm.split(":").map(Number); const t = h * 60 + mi + m; return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+// 시간 표시 "15:00 ~ 17:00". 종료 시각은 x.end, 없으면 x.type 의 소요 시간으로 계산
+const timeRange = (x) => { if (!x.time) return ""; const end = x.end || (x.type ? addMin(x.time, durOf(typeOf(x.type))) : ""); return end ? `${x.time} ~ ${end}` : x.time; };
+const slotShort = (x) => `${Number(x.date.slice(8))}일${x.time ? " " + timeRange(x) : ""}`;
+const slotLong = (x) => `${x.date.slice(5).replace(".", "월 ")}일${x.time ? " " + timeRange(x) : ""}`;
+// 후보 일시 전개: 시간이 있는 후보는 그대로(종료 시각 붙임), 시간이 없는(종일) 후보는 09:00 부터 소요 시간 단위로 18:00 까지 쪼갬
+const DAY_START = "09:00", DAY_END = "18:00";
+const expandSlots = (T) => {
+  const dur = durOf(T), out = [];
+  for (const x of slotsOf(T)) {
+    if (x.time) { out.push({ ...x, end: addMin(x.time, dur) }); continue; }
+    for (let t = DAY_START; addMin(t, dur) <= DAY_END; t = addMin(t, dur)) out.push({ date: x.date, time: t, end: addMin(t, dur) });
+  }
+  return out;
+};
 const periodOf = (T) => { const ss = slotsOf(T); return ss.length ? `${ss[0].date} – ${ss[ss.length - 1].date.slice(5)}` : "일정 미정"; };
 const sameSlot = (a, b) => a.date === b.date && (a.time || "") === (b.time || "");
+// 확정 일정의 담당 전문가 이름 ("KCOC1 · 강도욱" 표기용). 미배정이면 빈 문자열
+const expertName = (db, c) => (c?.expertId && db.experts.find((e) => e.id === c.expertId)?.name) || "";
 // 회차 단계: "expert" = 전문가 가능 일시 조사 중 (기관에는 아직 안 열림), "org" = 기관 접수 중. 값이 없으면 org (구버전 호환)
 const stageOf = (T) => T.stage || "org";
 // 기관에 열린 일시: 관리자가 전문가 가능 일시 중에서 고른 org_slots, 없으면 후보 전체
@@ -702,13 +720,14 @@ function Annual({ db, reload, say, log, me, editable }) {
 function AdminConsult({ db, reload, say, log }) {
   const [type, setType] = useState("h2");
   const [pick, setPick] = useState({});
+  const [pickExp, setPickExp] = useState({});   // 기관별 담당 전문가 선택
   const [zoom, setZoom] = useState({});
   const T = CONSULT_TYPES.find((t) => t.key === type);
 
   const avail = db.avail.filter((a) => a.type === type);
   const confirms = db.confirms.filter((c) => c.type === type);
   const orgIds = [...new Set(avail.map((a) => a.orgId))];
-  const slots = slotsOf(T);
+  const slots = expandSlots(T);                 // 1단계 표: 전문가가 고를 수 있는 시간 단위 후보
   const countOn = (x) => confirms.filter((c) => sameSlot(c, x)).length;
 
   // ── 1단계: 전문가 가능 일시 → 기관에 열 일시 선택 ──
@@ -743,10 +762,13 @@ function AdminConsult({ db, reload, say, log }) {
     if (!(already && sameSlot(already, x)) && countOn(x) >= CAP) {
       say(`${slotShort(x)}은(는) 정원 ${CAP}개 기관이 모두 찼습니다. 다른 일시를 선택해 주세요.`); return;
     }
+    // 담당 전문가: 선택값 → 기존 배정 → 그 일시에 가능하다고 한 전문가 중 첫 번째
+    const expert_id = pickExp[orgId] ?? already?.expertId ?? eAvail.find((a) => sameSlot(a, x))?.expertId ?? null;
+    const eName = db.experts.find((e) => e.id === expert_id)?.name;
     try {
-      await run(sb.from("confirms").upsert({ org_id: orgId, type, date: iso(x.date), time: x.time || "" }));
-      await run(sb.from("alerts").insert({ org_id: orgId, text: `${T.label} 일정이 ${slotLong(x)}로 확정되었습니다.` }));
-      await log("컨설팅 일정 확정", `${orgOf(orgId).name} · ${T.label} ${slotShort(x)}`);
+      await run(sb.from("confirms").upsert({ org_id: orgId, type, date: iso(x.date), time: x.time || "", expert_id: expert_id || null }));
+      await run(sb.from("alerts").insert({ org_id: orgId, text: `${T.label} 일정이 ${slotLong(x)}로 확정되었습니다.${eName ? ` (담당 전문가 ${eName})` : ""}` }));
+      await log("컨설팅 일정 확정", `${orgOf(orgId).name} · ${T.label} ${slotShort(x)}${eName ? ` · ${eName}` : ""}`);
     } catch (e) { say(`처리 실패: ${e.message}`); return; }
     reload();
     say(`확정했습니다 — ${orgOf(orgId).name} · ${slotShort(x)}`);
@@ -762,7 +784,7 @@ function AdminConsult({ db, reload, say, log }) {
     if (!/^https?:\/\//.test(url)) { say("http:// 또는 https:// 로 시작하는 주소를 입력해 주세요."); return; }
     const o = orgOf(orgId), mgr = db.managers[orgId], cf = confirms.find((c) => c.orgId === orgId);
     const v = { "{기관명}": o.name, "{담당자}": `${mgr.name} ${mgr.title}`.trim(), "{차년도}": String(o.year), "{회차}": T.label,
-      "{일시}": cf ? slotKey(cf) : "(미확정)", "{링크}": url, "{부서}": TEAM, "{사업명}": PROGRAM };
+      "{일시}": cf ? `${cf.date}${cf.time ? " " + timeRange(cf) : ""}` : "(미확정)", "{링크}": url, "{부서}": TEAM, "{사업명}": PROGRAM };
     setPreview({ orgId, url, retry, to: mgr.email, subject: fillMail(MAIL_SUBJECT, v), body: fillMail(MAIL_BODY, v) });
   };
   const saveZoom = (orgId) => openPreview(orgId, false);
@@ -801,16 +823,39 @@ function AdminConsult({ db, reload, say, log }) {
           {slots.length === 0 && <div style={{ fontSize: 12, color: "var(--ink3)" }}>사업 설정에서 이 회차의 후보 일시를 먼저 등록해 주세요.</div>}
           {slots.length > 0 && (
             <table>
-              <thead><tr><th style={{ width: 40 }}>공개</th><th style={{ width: 140 }}>일시</th><th>가능한 전문가</th></tr></thead>
+              <thead><tr><th style={{ width: 40 }}>공개</th><th style={{ width: 190 }}>일시</th><th>가능한 전문가</th></tr></thead>
               <tbody>
                 {slots.map((x) => { const k = slotKey(x), names = expertsOn(x); return (
                   <tr key={k} style={{ opacity: names.length ? 1 : 0.55 }}>
                     <td><input type="checkbox" style={{ width: "auto" }} checked={openKeys.includes(k)} onChange={() => toggleOpen(k)} /></td>
-                    <td className="mono"><b>{x.date.slice(5)}</b>{x.time && <> {x.time}</>}</td>
+                    <td className="mono"><b>{x.date.slice(5)}</b>{x.time && <> {timeRange(x)}</>}</td>
                     <td style={{ fontSize: 11.5 }}>{names.length ? names.map((n) => <span key={n} className="bg g-app" style={{ marginRight: 4, fontSize: 10.5 }}>{n}</span>) : <span style={{ color: "var(--ink3)" }}>응답 없음</span>}</td>
                   </tr>); })}
               </tbody>
             </table>
+          )}
+          {db.experts.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 6 }}>전문가별 응답</div>
+              <table>
+                <thead><tr><th style={{ width: 140 }}>전문가</th><th style={{ width: 90 }}>상태</th><th>선택한 가능 일시</th></tr></thead>
+                <tbody>
+                  {db.experts.map((e) => {
+                    const ds = eAvail.filter((a) => a.expertId === e.id).sort((a, b) => slotKey(a).localeCompare(slotKey(b)));
+                    return (
+                      <tr key={e.id}>
+                        <td><b style={{ fontWeight: 500 }}>{e.name}</b>{e.title && <span style={{ fontSize: 10.5, color: "var(--ink3)", marginLeft: 5 }}>{e.title}</span>}</td>
+                        <td>{ds.length ? <span className="bg g-app">응답 완료</span> : <span className="bg g-not">응답 이전</span>}</td>
+                        <td style={{ fontSize: 11.5 }}>
+                          {ds.length ? ds.map((x) => <span key={slotKey(x)} className="bg g-rev" style={{ marginRight: 4, fontSize: 10.5 }}>{slotShort(x)}</span>)
+                            : <span style={{ color: "var(--ink3)" }}>—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
             <button className="b1 bs" onClick={startOrg} disabled={!slots.length}>{stage === "org" ? "공개 일시 변경 저장" : "기관 접수 시작 →"}</button>
@@ -822,24 +867,25 @@ function AdminConsult({ db, reload, say, log }) {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="chd"><h3>2단계 · {T.label} <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{periodOf(T)}</span></h3>
-          <span className="bg g-rev" style={{ fontSize: 10.5 }}>일시별 정원 {CAP}개 기관 · 1회 60분</span></div>
+          <span className="bg g-rev" style={{ fontSize: 10.5 }}>일시별 정원 {CAP}개 기관 · 1회 {durOf(T)}분</span></div>
         <div style={{ display: "flex", gap: 10, padding: 16, flexWrap: "wrap" }}>
           {slots.length === 0 && <div style={{ fontSize: 12, color: "var(--ink3)" }}>사업 설정에서 이 회차의 일시를 먼저 등록해 주세요.</div>}
-          {[...new Set(slots.map((x) => x.date))].map((d) => (
+          {[...new Set((stage === "org" ? orgSlotsOf(T) : slots).map((x) => x.date))].map((d) => (
             <div key={d} className="card" style={{ flex: "1 1 160px", padding: 12, background: "#FCFDFF" }}>
               <div style={{ fontSize: 12.5, fontWeight: 700 }}>{Number(d.slice(8))}일</div>
               <div style={{ fontSize: 10.5, color: "var(--ink3)", marginBottom: 8 }}>{d.slice(0, 7)}</div>
-              {slots.filter((x) => x.date === d).map((x) => {
+              {(stage === "org" ? orgSlotsOf(T) : slots).filter((x) => x.date === d).map((x) => {
                 const n = countOn(x);
                 return (
                   <div key={slotKey(x)} style={{ marginBottom: 7, paddingTop: 6, borderTop: "1px solid var(--line2)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                      <b className="mono">{x.time || "종일"}</b>
+                      <b className="mono">{timeRange(x) || "종일"}</b>
                       <span style={{ color: n >= CAP ? "var(--redT)" : "var(--ink2s)" }}>확정 {n}/{CAP}{n >= CAP && " · 마감"}</span>
                     </div>
                     <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>체크 {avail.filter((a) => sameSlot(a, x)).length}개 기관</div>
                     {confirms.filter((c) => sameSlot(c, x)).map((c) => (
-                      <div key={c.orgId} className="bg g-app" style={{ fontSize: 10, marginTop: 4, display: "block" }}>{orgOf(c.orgId).name}</div>
+                      <div key={c.orgId} className="bg g-app" style={{ fontSize: 10, marginTop: 4, display: "block" }}>
+                        {orgOf(c.orgId).name}{expertName(db, c) ? ` · ${expertName(db, c)}` : ""}</div>
                     ))}
                   </div>
                 );
@@ -854,7 +900,7 @@ function AdminConsult({ db, reload, say, log }) {
           <span style={{ fontSize: 11, color: "var(--ink3)" }}>{orgIds.length}개 기관 신청 · {confirms.length}건 확정</span></div>
         <table>
           <thead><tr><th style={{ width: 110 }}>기관</th><th>가능 일시 (체크)</th><th style={{ width: 78 }}>상태</th>
-            <th style={{ width: 190 }}>일정 확정</th><th style={{ width: 250 }}>Zoom 링크 / 안내 메일</th></tr></thead>
+            <th style={{ width: 300 }}>일정 확정 · 담당 전문가</th><th style={{ width: 250 }}>Zoom 링크 / 안내 메일</th></tr></thead>
           <tbody>
             {orgIds.map((oid) => {
               const o = orgOf(oid);
@@ -870,12 +916,18 @@ function AdminConsult({ db, reload, say, log }) {
                   <td>{cf ? <span className="bg g-app">확정</span> : <span className="bg g-rev">신청 완료</span>}</td>
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <select style={{ width: 120, padding: "5px 7px" }} value={pick[oid] ?? (cf ? slotKey(cf) : slotKey(ds[0]))}
+                      <select style={{ width: 110, padding: "5px 7px" }} value={pick[oid] ?? (cf ? slotKey(cf) : slotKey(ds[0]))}
                         onChange={(e) => setPick({ ...pick, [oid]: e.target.value })}>
                         {ds.map((x) => <option key={slotKey(x)} value={slotKey(x)}>{slotShort(x)}</option>)}
                       </select>
+                      <select style={{ width: 100, padding: "5px 7px" }} value={pickExp[oid] ?? cf?.expertId ?? ""}
+                        onChange={(e) => setPickExp({ ...pickExp, [oid]: e.target.value })}>
+                        <option value="">전문가</option>
+                        {db.experts.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                      </select>
                       <button className="b2 bs" onClick={() => confirm(oid)}>{cf ? "변경" : "확정"}</button>
                     </div>
+                    {cf && <div style={{ fontSize: 10.5, marginTop: 4, color: "var(--ink3)" }}>확정 {slotShort(cf)}{expertName(db, cf) ? ` · ${expertName(db, cf)}` : " · 전문가 미배정"}</div>}
                   </td>
                   <td>
                     {!cf ? <span style={{ fontSize: 11, color: "var(--ink3)" }}>확정 후 입력 가능</span> : (
@@ -1012,7 +1064,7 @@ function OrgConsult({ db, reload, say, log, me }) {
             {slotLong(cf)}
           </div>
           <div style={{ fontSize: 12, color: "var(--greenT)", marginTop: 6 }}>
-            1회 60분 · 온라인 · {cf.zoom
+            1회 {durOf(T)}분 · 온라인{expertName(db, cf) && <> · 담당 전문가 {expertName(db, cf)}</>} · {cf.zoom
               ? <>Zoom 링크 <a href={cf.zoom} target="_blank" rel="noreferrer" style={{ color: "var(--greenT)" }}>{cf.zoom}</a></>
               : "Zoom 링크는 확정 후 담당자 이메일로 발송됩니다."}
           </div>
@@ -1035,7 +1087,7 @@ function OrgConsult({ db, reload, say, log, me }) {
                     return (
                       <div key={k} className={`dsel ${on ? "dsel-on" : ""} ${full ? "dsel-full" : ""}`}
                         style={{ marginBottom: 6, padding: "8px 10px" }} onClick={() => !full && toggle(k)}>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>{x.time || "종일"}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{timeRange(x) || "종일"}</div>
                         <div style={{ fontSize: 10.5 }}>{full ? "마감" : on ? "가능 ✓" : "선택"}</div>
                       </div>
                     );
@@ -1508,7 +1560,7 @@ function ExpertConsult({ db, reload, say, log, me }) {
   // ── 가능 일시 조사: 사무국이 등록한 후보 일시 중 가능한 일시를 체크 ──
   const [type, setType] = useState(CONSULT_TYPES[0]?.key);
   const T = CONSULT_TYPES.find((t) => t.key === type);
-  const slots = T ? slotsOf(T) : [];
+  const slots = T ? expandSlots(T) : [];
   const mine = db.expertAvail.filter((a) => a.expertId === me.id && a.type === type).map(slotKey);
   const [picks, setPicks] = useState(mine);
   useEffect(() => { setPicks(db.expertAvail.filter((a) => a.expertId === me.id && a.type === type).map(slotKey)); }, [type, db]);
@@ -1544,7 +1596,7 @@ function ExpertConsult({ db, reload, say, log, me }) {
             <div className="chd"><h3>{T.label} 가능 일시 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{periodOf(T)}</span></h3>
               {stageOf(T) === "org"
                 ? <span className="bg g-app" style={{ fontSize: 10.5 }}>기관 접수 중 · 변경 시 사무국에 알려 주세요</span>
-                : <span className="bg g-rev" style={{ fontSize: 10.5 }}>가능한 일시를 모두 체크</span>}</div>
+                : <span className="bg g-rev" style={{ fontSize: 10.5 }}>가능한 시간대를 모두 체크 · 1건 {durOf(T)}분</span>}</div>
             <div style={{ display: "flex", gap: 10, padding: 16, flexWrap: "wrap" }}>
               {slots.length === 0 && <div style={{ fontSize: 12, color: "var(--ink3)" }}>아직 후보 일시가 없습니다. 사무국이 일정을 등록하면 표시됩니다.</div>}
               {[...new Set(slots.map((x) => x.date))].map((d) => (
@@ -1554,7 +1606,7 @@ function ExpertConsult({ db, reload, say, log, me }) {
                     const k = slotKey(x); const on = picks.includes(k);
                     return (
                       <div key={k} className={`dsel ${on ? "dsel-on" : ""}`} style={{ marginBottom: 6, padding: "8px 10px" }} onClick={() => toggle(k)}>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>{x.time || "종일"}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{timeRange(x) || "종일"}</div>
                         <div style={{ fontSize: 10.5 }}>{on ? "가능 ✓" : "선택"}</div>
                       </div>
                     );
@@ -1572,21 +1624,22 @@ function ExpertConsult({ db, reload, say, log, me }) {
 
       <div className="card">
         <div className="chd"><h3>확정 컨설팅 일정</h3>
-          <span style={{ fontSize: 11, color: "var(--ink3)" }}>{rows.length}건 · 1회 60분 · 변경은 사무국만 가능</span></div>
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>{rows.length}건 · 변경은 사무국만 가능</span></div>
         <table>
           <thead><tr><th style={{ width: 130 }}>일시</th><th style={{ width: 140 }}>구분</th><th>기관</th>
-            <th style={{ width: 150 }}>기관 담당자</th><th style={{ width: 280 }}>Zoom 링크</th></tr></thead>
+            <th style={{ width: 110 }}>담당 전문가</th><th style={{ width: 150 }}>기관 담당자</th><th style={{ width: 260 }}>Zoom 링크</th></tr></thead>
           <tbody>
             {rows.map((c) => {
               const CT = CONSULT_TYPES.find((t) => t.key === c.type);
               const m = db.managers[c.orgId];
               return (
                 <tr key={`${c.orgId}-${c.type}`}>
-                  <td className="mono"><b>{c.date.slice(5)}</b>{c.time && <> {c.time}</>}</td>
+                  <td className="mono"><b>{c.date.slice(5)}</b>{c.time && <> {timeRange(c)}</>}</td>
                   <td><span className="bg g-rev" style={{ fontSize: 10.5 }}>{CT?.label || c.type}</span></td>
                   <td><b style={{ fontWeight: 500 }}>{orgOf(c.orgId).name}</b>
                     {db.pre[c.orgId] && <div style={{ fontSize: 10.5, color: "var(--brand2)" }}>
                       사전 정보 제출됨 · 집행률 {db.pre[c.orgId].rate}%</div>}</td>
+                  <td style={{ fontSize: 11.5 }}>{c.expertId === me.id ? <span className="bg g-app">{me.name} (본인)</span> : (expertName(db, c) || <span style={{ color: "var(--ink3)" }}>미배정</span>)}</td>
                   <td style={{ fontSize: 11.5, color: "var(--ink2s)" }}>{m.name} {m.title}</td>
                   <td style={{ fontSize: 11.5 }}>
                     {c.zoom ? <a href={c.zoom} target="_blank" rel="noreferrer" className="lnk">{c.zoom}</a>
@@ -1595,7 +1648,7 @@ function ExpertConsult({ db, reload, say, log, me }) {
                 </tr>
               );
             })}
-            {!rows.length && <tr><td colSpan={5} style={{ textAlign: "center", padding: 36, color: "var(--ink3)" }}>
+            {!rows.length && <tr><td colSpan={6} style={{ textAlign: "center", padding: 36, color: "var(--ink3)" }}>
               확정된 컨설팅 일정이 없습니다. 사무국 확정 후 표시됩니다.</td></tr>}
           </tbody>
         </table>
@@ -1721,7 +1774,7 @@ function OrgDash({ db, reload, say, go, me, setKind }) {
             <>
               <div className="mono" style={{ fontSize: 19, fontWeight: 700, color: "var(--greenT)" }}>{slotLong(cf)}</div>
               <div style={{ fontSize: 11.5, color: "var(--ink2s)", marginTop: 4 }}>
-                {CONSULT_TYPES.find((t) => t.key === cf.type).label} · 1회 60분<br />
+                {CONSULT_TYPES.find((t) => t.key === cf.type).label} · 1회 {durOf(typeOf(cf.type))}분<br />
                 {cf.zoom ? `Zoom 링크 등록됨` : "Zoom 링크 대기 중"}
               </div>
             </>
@@ -2167,7 +2220,7 @@ function Settings({ db, reload, say, log }) {
   const init = () => {
     const c = currentSettings();
     return { ...c,
-      consult_types: c.consult_types.map((t) => ({ key: t.key, label: t.label, required: !!t.required, slots: slotsOf(t), stage: t.stage || "org", org_slots: t.org_slots || [] })),
+      consult_types: c.consult_types.map((t) => ({ key: t.key, label: t.label, required: !!t.required, slots: slotsOf(t), stage: t.stage || "org", org_slots: t.org_slots || [], dur: t.dur || 120 })),
       notices: c.notices.map((n) => ({ t: n.t, d: n.d, body: n.body.join("\n\n"), ctaLabel: n.cta?.[0] || "", ctaPage: n.cta?.[1] || "" })) };
   };
   const [f, setF] = useState(init);
@@ -2252,7 +2305,7 @@ function Settings({ db, reload, say, log }) {
 
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="chd"><h3>컨설팅 회차</h3>
-          <button className="b2 bs" onClick={() => up("consult_types", [...f.consult_types, { key: newKey("c"), label: "", required: true, slots: [], stage: "expert", org_slots: [] }])}>+ 회차 추가</button></div>
+          <button className="b2 bs" onClick={() => up("consult_types", [...f.consult_types, { key: newKey("c"), label: "", required: true, slots: [], stage: "expert", org_slots: [], dur: 120 }])}>+ 회차 추가</button></div>
         {f.consult_types.map((t, i) => {
           const setSlots = (slots) => upRow("consult_types", i, { slots });
           return (
@@ -2261,13 +2314,15 @@ function Settings({ db, reload, say, log }) {
                 <IN style={{ flex: 1 }} value={t.label} placeholder="회차 이름 (예: 하반기 필수컨설팅)" onChange={(e) => upRow("consult_types", i, { label: e.target.value })} />
                 <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
                   <input type="checkbox" style={{ width: "auto" }} checked={!!t.required} onChange={(e) => upRow("consult_types", i, { required: e.target.checked })} />필수</label>
+                <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>1건
+                  <IN type="number" style={{ width: 70 }} value={t.dur || 120} onChange={(e) => upRow("consult_types", i, { dur: Number(e.target.value) || 120 })} />분</label>
                 <select style={{ width: 150, padding: "6px 8px" }} value={t.stage || "org"} onChange={(e) => upRow("consult_types", i, { stage: e.target.value })}>
                   <option value="expert">전문가 조사 중</option><option value="org">기관 접수 중</option>
                 </select>
                 {usedTypes.has(t.key) ? <span style={{ fontSize: 10.5, color: "var(--ink3)", whiteSpace: "nowrap" }}>신청 있음</span>
                   : <button className="b2 bs" onClick={() => delRow("consult_types", i)}>회차 삭제</button>}
               </div>
-              <div style={{ fontSize: 11, color: "var(--ink3)", marginBottom: 6 }}>가능 일시 — 시간을 비우면 하루 단위로 신청받습니다</div>
+              <div style={{ fontSize: 11, color: "var(--ink3)", marginBottom: 6 }}>후보 일시 — 시간을 비우면 그날 09:00~18:00 를 소요 시간 단위(예: 2시간)로 나눠 전문가가 시간대를 고릅니다. 시간을 넣으면 그 시작 시각 한 칸만 후보가 됩니다.</div>
               {t.slots.map((x, j) => (
                 <div key={j} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
                   <IN type="date" style={{ width: 170 }} value={x.date ? iso(x.date) : ""} onChange={(e) => setSlots(t.slots.map((y, k) => (k === j ? { ...y, date: fmt(e.target.value) } : y)))} />
