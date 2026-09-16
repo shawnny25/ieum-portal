@@ -299,3 +299,33 @@ create policy exp_sel on confirms for select to authenticated using (is_expert()
 drop policy if exists exp_sel on pre;
 create policy exp_sel on pre for select to authenticated
   using (is_expert() and exists (select 1 from confirms c where c.org_id = pre.org_id and c.expert_id = auth.uid()));
+
+-- ───────── 기관 희망 순위 (2026-09-16 추가): 체크한 순서를 1,2,3… 으로 저장 ─────────
+alter table avail add column rank int;
+
+-- ───────── 컨설팅 일정 수립 8단계 흐름 (2026-09-16 추가) ─────────
+-- 기관별 담당 전문가. 기관은 담당 전문가의 가능 일시만 보고 1·2·3순위를 고른다.
+alter table orgs add column expert_id uuid references profiles on delete set null;
+-- 전문가가 후보 일시 외에 주관식으로 적는 추가 가능 시간
+create table expert_notes (
+  expert_id uuid not null references profiles on delete cascade,
+  type text not null,
+  note text not null default '',
+  at timestamptz not null default now(),
+  primary key (expert_id, type)
+);
+alter table expert_notes enable row level security;
+create policy adm on expert_notes for all to authenticated using (is_admin()) with check (is_admin());
+create policy exp_rw on expert_notes for all to authenticated
+  using (is_expert() and expert_id = auth.uid()) with check (is_expert() and expert_id = auth.uid());
+-- 기관: 담당 전문가의 가능 일시 조회
+create function my_expert() returns uuid language sql stable security definer set search_path = public as
+  $$ select expert_id from orgs where id = my_org() $$;
+create policy org_sel on expert_avail for select to authenticated
+  using (my_role() = 'org' and org_active(my_org()) and expert_id = my_expert());
+-- 기관: 같은 담당 전문가를 공유하는 다른 기관의 희망 순위·확정 일정 조회 (선점 표시용)
+create policy org_sel_shared on avail for select to authenticated
+  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null
+         and (select expert_id from orgs where id = avail.org_id) = my_expert());
+create policy org_sel_shared on confirms for select to authenticated
+  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null and expert_id = my_expert());
