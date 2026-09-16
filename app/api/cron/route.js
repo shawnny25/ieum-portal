@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { adminClient } from "@/lib/supabase/server";
 
-const TABLES = ["orgs", "profiles", "submissions", "versions", "feedbacks", "avail", "confirms", "pre", "budgets", "docs", "reports", "alerts", "logs", "roadmap", "expert_avail", "settings"];
+const TABLES = ["orgs", "profiles", "submissions", "versions", "feedbacks", "avail", "confirms", "pre", "budgets", "docs", "reports", "alerts", "logs", "roadmap", "expert_avail", "expert_notes", "settings"];
 const KEEP_DAYS = 60;
 
 // 매일 0시(vercel.json crons).
