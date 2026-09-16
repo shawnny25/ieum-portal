@@ -821,19 +821,44 @@ function AdminConsult({ db, reload, say, log }) {
             : <span className="bg g-req" style={{ fontSize: 10.5 }}>전문가 조사 중 · 기관에는 아직 안 보임</span>}</div>
         <div style={{ padding: 16 }}>
           {slots.length === 0 && <div style={{ fontSize: 12, color: "var(--ink3)" }}>사업 설정에서 이 회차의 후보 일시를 먼저 등록해 주세요.</div>}
-          {slots.length > 0 && (
-            <table>
-              <thead><tr><th style={{ width: 40 }}>공개</th><th style={{ width: 190 }}>일시</th><th>가능한 전문가</th></tr></thead>
-              <tbody>
-                {slots.map((x) => { const k = slotKey(x), names = expertsOn(x); return (
-                  <tr key={k} style={{ opacity: names.length ? 1 : 0.55 }}>
-                    <td><input type="checkbox" style={{ width: "auto" }} checked={openKeys.includes(k)} onChange={() => toggleOpen(k)} /></td>
-                    <td className="mono"><b>{x.date.slice(5)}</b>{x.time && <> {timeRange(x)}</>}</td>
-                    <td style={{ fontSize: 11.5 }}>{names.length ? names.map((n) => <span key={n} className="bg g-app" style={{ marginRight: 4, fontSize: 10.5 }}>{n}</span>) : <span style={{ color: "var(--ink3)" }}>응답 없음</span>}</td>
-                  </tr>); })}
-              </tbody>
-            </table>
-          )}
+          {slots.length > 0 && (() => {
+            // 날짜를 열, 시간대를 행으로 놓은 격자. 칸마다 공개 체크 + 가능한 전문가
+            const dates = [...new Set(slots.map((x) => x.date))];
+            const times = [...new Set(slots.map((x) => timeRange(x) || "종일"))];
+            const at = (d, t) => slots.find((x) => x.date === d && (timeRange(x) || "종일") === t);
+            return (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ minWidth: 120 + dates.length * 150 }}>
+                  <thead><tr><th style={{ width: 120 }}>시간대</th>
+                    {dates.map((d) => <th key={d} style={{ textAlign: "center" }}>{Number(d.slice(5, 7))}월 {Number(d.slice(8))}일</th>)}</tr></thead>
+                  <tbody>
+                    {times.map((t) => (
+                      <tr key={t}>
+                        <td className="mono" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}><b>{t}</b></td>
+                        {dates.map((d) => {
+                          const x = at(d, t);
+                          if (!x) return <td key={d} style={{ background: "var(--line2)" }} />;
+                          const k = slotKey(x), names = expertsOn(x), on = openKeys.includes(k);
+                          return (
+                            <td key={d} onClick={() => toggleOpen(k)}
+                              style={{ cursor: "pointer", verticalAlign: "top", background: on ? "var(--brandL)" : names.length ? "#FCFDFF" : "transparent" }}>
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                <input type="checkbox" style={{ width: "auto", marginTop: 2 }} checked={on} onChange={() => toggleOpen(k)} onClick={(e) => e.stopPropagation()} />
+                                <div style={{ fontSize: 11, lineHeight: 1.6 }}>
+                                  {names.length ? names.map((n) => <span key={n} className="bg g-app" style={{ display: "inline-block", marginRight: 3, marginBottom: 2, fontSize: 10.5 }}>{n}</span>)
+                                    : <span style={{ color: "var(--ink3)" }}>—</span>}
+                                </div>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
           {db.experts.length > 0 && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 6 }}>전문가별 응답</div>
@@ -860,7 +885,7 @@ function AdminConsult({ db, reload, say, log }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
             <button className="b1 bs" onClick={startOrg} disabled={!slots.length}>{stage === "org" ? "공개 일시 변경 저장" : "기관 접수 시작 →"}</button>
             {stage === "org" && <button className="b2 bs" onClick={backToExpert}>접수 닫기</button>}
-            <span style={{ fontSize: 11, color: "var(--ink3)" }}>체크한 일시만 기관 화면에 신청 가능한 일시로 표시됩니다. 전문가가 가능하다고 한 일시를 고르세요.</span>
+            <span style={{ fontSize: 11, color: "var(--ink3)" }}>칸을 클릭해 기관에 열 시간대를 고르세요 (전문가 이름이 있는 칸 = 그 전문가가 가능). 체크한 칸만 기관 화면에 표시됩니다.</span>
           </div>
         </div>
       </div>
@@ -1555,7 +1580,9 @@ function ExpertSubmit({ db, reload, say, log, me }) {
 }
 
 function ExpertConsult({ db, reload, say, log, me }) {
-  const rows = db.confirms.slice().sort((a, b) => slotKey(a).localeCompare(slotKey(b)));
+  // 본인이 담당 전문가로 배정된 확정 일정만 (RLS 도 동일하게 제한)
+  const rows = db.confirms.filter((c) => c.expertId === me.id).sort((a, b) => slotKey(a).localeCompare(slotKey(b)));
+  const myOrgIds = new Set(rows.map((c) => c.orgId));
 
   // ── 가능 일시 조사: 사무국이 등록한 후보 일시 중 가능한 일시를 체크 ──
   const [type, setType] = useState(CONSULT_TYPES[0]?.key);
@@ -1623,8 +1650,8 @@ function ExpertConsult({ db, reload, say, log, me }) {
       )}
 
       <div className="card">
-        <div className="chd"><h3>확정 컨설팅 일정</h3>
-          <span style={{ fontSize: 11, color: "var(--ink3)" }}>{rows.length}건 · 변경은 사무국만 가능</span></div>
+        <div className="chd"><h3>내 확정 컨설팅 일정</h3>
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>{rows.length}건 · 본인 담당만 표시 · 변경은 사무국만 가능</span></div>
         <table>
           <thead><tr><th style={{ width: 130 }}>일시</th><th style={{ width: 140 }}>구분</th><th>기관</th>
             <th style={{ width: 110 }}>담당 전문가</th><th style={{ width: 150 }}>기관 담당자</th><th style={{ width: 260 }}>Zoom 링크</th></tr></thead>
@@ -1639,7 +1666,7 @@ function ExpertConsult({ db, reload, say, log, me }) {
                   <td><b style={{ fontWeight: 500 }}>{orgOf(c.orgId).name}</b>
                     {db.pre[c.orgId] && <div style={{ fontSize: 10.5, color: "var(--brand2)" }}>
                       사전 정보 제출됨 · 집행률 {db.pre[c.orgId].rate}%</div>}</td>
-                  <td style={{ fontSize: 11.5 }}>{c.expertId === me.id ? <span className="bg g-app">{me.name} (본인)</span> : (expertName(db, c) || <span style={{ color: "var(--ink3)" }}>미배정</span>)}</td>
+                  <td style={{ fontSize: 11.5 }}><span className="bg g-app">{me.name}</span></td>
                   <td style={{ fontSize: 11.5, color: "var(--ink2s)" }}>{m.name} {m.title}</td>
                   <td style={{ fontSize: 11.5 }}>
                     {c.zoom ? <a href={c.zoom} target="_blank" rel="noreferrer" className="lnk">{c.zoom}</a>
@@ -1649,17 +1676,17 @@ function ExpertConsult({ db, reload, say, log, me }) {
               );
             })}
             {!rows.length && <tr><td colSpan={6} style={{ textAlign: "center", padding: 36, color: "var(--ink3)" }}>
-              확정된 컨설팅 일정이 없습니다. 사무국 확정 후 표시됩니다.</td></tr>}
+              담당으로 배정된 확정 일정이 없습니다. 사무국이 확정·배정하면 표시됩니다.</td></tr>}
           </tbody>
         </table>
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="chd"><h3>컨설팅 사전 정보</h3>
-          <span style={{ fontSize: 11, color: "var(--ink3)" }}>기관이 컨설팅 전 작성한 내용</span></div>
-        {Object.keys(db.pre).length === 0
-          ? <div style={{ padding: 30, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>제출된 사전 정보가 없습니다.</div>
-          : Object.entries(db.pre).map(([oid, p]) => (
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>내가 담당하는 기관이 컨설팅 전 작성한 내용</span></div>
+        {Object.entries(db.pre).filter(([oid]) => myOrgIds.has(Number(oid))).length === 0
+          ? <div style={{ padding: 30, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>담당 기관의 사전 정보가 아직 없습니다.</div>
+          : Object.entries(db.pre).filter(([oid]) => myOrgIds.has(Number(oid))).map(([oid, p]) => (
             <div key={oid} style={{ padding: "14px 16px", borderBottom: "1px solid var(--line2)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
                 <b>{orgOf(Number(oid)).name}</b>
