@@ -271,3 +271,21 @@ alter table avail drop constraint avail_pkey;
 alter table avail add column time text not null default '';
 alter table avail add primary key (org_id, type, date, time);
 alter table confirms add column time text not null default '';
+
+-- ───────── 전문가 컨설팅 가능 일시 (2026-09-16 추가) ─────────
+-- 흐름: 관리자가 회차별 후보 일시 등록 → 전문가가 가능 일시 체크(expert_avail)
+--       → 관리자가 전문가 가능 일시 중 기관에 열 일시를 골라 '기관 접수 시작'(settings.consult_types[].stage='org', org_slots)
+--       → 기관이 그 일시 중에서 체크(avail) → 관리자 확정(confirms)
+create table expert_avail (
+  expert_id uuid not null references profiles on delete cascade,
+  type text not null,
+  date date not null,
+  time text not null default '',
+  primary key (expert_id, type, date, time)
+);
+alter table expert_avail enable row level security;
+create policy adm on expert_avail for all to authenticated using (is_admin()) with check (is_admin());
+create policy exp_rw on expert_avail for all to authenticated
+  using (is_expert() and expert_id = auth.uid()) with check (is_expert() and expert_id = auth.uid());
+-- 확정 일정은 관리자만 변경: 전문가의 confirms 수정(zoom 비고) 권한 제거
+drop policy if exists exp_upd on confirms;
