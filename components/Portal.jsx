@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { sb } from "@/lib/supabase/client";
 import { loadDb, run, uploadFiles, download } from "@/lib/db";
 import { PROGRAM, TEAM, CUR_YEAR, MAIL_VARS, MAIL_SUBJECT, MAIL_BODY, fillMail, REPORTS, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
-  CONSULT_TYPES, OPT_FIELDS, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb, currentSettings } from "@/lib/config";
+  CONSULT_TYPES, OPT_FIELDS, EXPERT_PREF_HINT, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb, currentSettings } from "@/lib/config";
 
 /* ══════════════════════════════════════════════════════════
    이음 · NGO PARTNERS PORTAL — 관리자 / 기관 / 전문가 3종 화면
@@ -58,17 +58,23 @@ const WD = ["일", "월", "화", "수", "목", "금", "토"];
 const openAtLabel = (T) => { const v = openAtOf(T); if (!v) return ""; const d = new Date(v);
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일(${WD[d.getDay()]}) ${String(d.getHours()).padStart(2, "0")}시${d.getMinutes() ? ` ${d.getMinutes()}분` : ""}`; };
 const isApply = (T) => T?.mode === "apply";
+const appValue = (f, d) => {
+  if (f.kind === "static") return f.key === "org" ? orgOf(d._orgId)?.name : d[f.key];
+  if (f.kind === "multi") return [...(d[f.key] || []), ...(d[`${f.key}_other`] ? [`기타: ${d[`${f.key}_other`]}`] : [])].join(", ");
+  return d[f.key];
+};
 const AppView = ({ app }) => (
   <div>
     {OPT_FIELDS.map((f) => (
       <div key={f.key} style={{ marginBottom: 6 }}>
+        {f.section && <div style={{ fontSize: 11, fontWeight: 700, margin: "8px 0 4px" }}>{f.section}</div>}
         <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>{f.label}</div>
-        <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{app.data[f.key] || "—"}</div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{appValue(f, { ...app.data, _orgId: app.orgId }) || "—"}</div>
       </div>
     ))}
     <div style={{ marginBottom: 6 }}>
-      <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>희망 전문가</div>
-      <div style={{ fontSize: 12.5 }}>{app.expertPref || <span style={{ color: "var(--ink3)" }}>없음 · 사무국 배정</span>}</div>
+      <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>희망 컨설턴트</div>
+      <div style={{ fontSize: 12.5 }}>{app.expertPref || <span style={{ color: "var(--ink3)" }}>없음 · 사무국 추천 배정</span>}</div>
     </div>
   </div>
 );
@@ -875,7 +881,7 @@ function AdminConsult({ db, reload, say, log }) {
                     <div className="mono" style={{ fontSize: 10.5, color: "var(--ink3)" }}>제출 {ap.at}</div>
                     {cf ? <span className="bg g-app" style={{ marginTop: 4 }}>배정 완료</span> : <span className="bg g-rev" style={{ marginTop: 4 }}>배정 대기</span>}</td>
                   <td style={{ verticalAlign: "top", fontSize: 12 }}>
-                    <div style={{ fontWeight: 500 }}>{ap.data[OPT_FIELDS[0].key] || "—"}</div>
+                    <div style={{ fontWeight: 500 }}>{appValue(OPT_FIELDS.find((f) => f.key === "field"), ap.data) || "—"}</div>
                     {openApp[oid] ? <div style={{ marginTop: 6 }}><AppView app={ap} /><span className="lnk" onClick={() => setOpenApp({ ...openApp, [oid]: false })}>접기</span></div>
                       : <span className="lnk" onClick={() => setOpenApp({ ...openApp, [oid]: true })}>전체 보기 →</span>}
                   </td>
@@ -1169,7 +1175,8 @@ function OrgConsult({ db, reload, say, log, me }) {
   const [editPre, setEditPre] = useState(!savedPre);   // 저장된 내용이 있으면 열람 모드로 시작
   // 신청서 방식(선택컨설팅)
   const app = db.consultApps.find((a) => a.orgId === me.id && a.type === type);
-  const [appForm, setAppForm] = useState(() => ({ ...(app?.data || {}), expertPref: app?.expertPref || "" }));
+  const blankApp = (ap) => ({ manager: db.managers[me.id]?.name || "", ...(ap?.data || {}), expertPref: ap?.expertPref || "" });
+  const [appForm, setAppForm] = useState(() => blankApp(app));
   const [editApp, setEditApp] = useState(!app);
   const [appErrs, setAppErrs] = useState({});
 
@@ -1178,18 +1185,29 @@ function OrgConsult({ db, reload, say, log, me }) {
     const sp = db.pre[me.id]?.[type];
     setForm(sp || { rate: "", progress: "", country: "", ask: "" }); setEditPre(!sp); setErrs({});
     const ap = db.consultApps.find((a) => a.orgId === me.id && a.type === type);
-    setAppForm({ ...(ap?.data || {}), expertPref: ap?.expertPref || "" }); setEditApp(!ap); setAppErrs({});
+    setAppForm(blankApp(ap)); setEditApp(!ap); setAppErrs({});
   }, [type, me.id]);
 
   const saveApp = async () => {
     const e = {};
-    OPT_FIELDS.forEach((f) => { if (f.required && !String(appForm[f.key] || "").trim()) e[f.key] = 1; });
+    OPT_FIELDS.forEach((f) => {
+      if (f.kind === "static") return;
+      if (f.kind === "multi") { if (f.required && !(appForm[f.key] || []).length && !String(appForm[`${f.key}_other`] || "").trim()) e[f.key] = 1; return; }
+      const v = String(appForm[f.key] || "").trim();
+      if (f.required && !v) e[f.key] = 1;
+      if (f.max && v.length > f.max) e[f.key] = `${f.max}자 이내`;
+    });
     setAppErrs(e);
-    if (Object.keys(e).length) { say("입력하지 않은 필수 항목이 있습니다."); return; }
-    const data = Object.fromEntries(OPT_FIELDS.map((f) => [f.key, String(appForm[f.key] || "").trim()]));
+    if (Object.keys(e).length) { say(Object.values(e).some((x) => x !== 1) ? "글자 수 제한을 넘은 항목이 있습니다." : "입력하지 않은 필수 항목이 있습니다."); return; }
+    const data = {};
+    OPT_FIELDS.forEach((f) => {
+      if (f.kind === "static") return;
+      if (f.kind === "multi") { data[f.key] = appForm[f.key] || []; data[`${f.key}_other`] = String(appForm[`${f.key}_other`] || "").trim(); return; }
+      data[f.key] = String(appForm[f.key] || "").trim();
+    });
     try {
       await run(sb.from("consult_apps").upsert({ org_id: me.id, type, data, expert_pref: (appForm.expertPref || "").trim(), at: new Date().toISOString() }));
-      await log(app ? "선택컨설팅 신청서 수정" : "선택컨설팅 신청서 제출", `${T.label} · ${data[OPT_FIELDS[0].key]}`);
+      await log(app ? "선택컨설팅 신청서 수정" : "선택컨설팅 신청서 제출", `${T.label} · ${(data.field || []).join("/") || data.field_other || ""}`);
     } catch (e2) { say(`저장 실패: ${e2.message}`); return; }
     reload(); setEditApp(false);
     say(app ? "신청서를 수정했습니다." : "신청서를 제출했습니다. 사무국이 전문가와 일시를 배정하면 안내됩니다.");
@@ -1245,20 +1263,47 @@ function OrgConsult({ db, reload, say, log, me }) {
             </span></div>
           {!editApp && app ? <div style={{ padding: 18 }}><AppView app={app} /></div> : (
             <div style={{ padding: 18 }}>
-              {OPT_FIELDS.map((f) => (
-                <div key={f.key} style={{ marginBottom: 14 }}>
-                  <label className="lbl">{f.label}{f.required && <span style={{ color: "var(--redT)" }}> *</span>}</label>
-                  {f.kind === "textarea"
-                    ? <textarea rows={3} className={appErrs[f.key] ? "err" : ""} value={appForm[f.key] || ""} onChange={(e) => setAppForm({ ...appForm, [f.key]: e.target.value })} />
-                    : <input type={f.kind === "date" ? "date" : "text"} className={appErrs[f.key] ? "err" : ""} value={appForm[f.key] || ""} onChange={(e) => setAppForm({ ...appForm, [f.key]: e.target.value })} />}
-                </div>
-              ))}
+              {OPT_FIELDS.map((f) => {
+                const v = appForm[f.key];
+                const len = typeof v === "string" ? v.length : 0;
+                const first = f.key === OPT_FIELDS[0].key;
+                return (
+                  <div key={f.key} style={{ marginBottom: 14 }}>
+                    {f.section && <div style={{ fontSize: 12.5, fontWeight: 700, margin: "6px 0 10px", paddingTop: first ? 0 : 10, borderTop: first ? "none" : "1px solid var(--line2)" }}>{f.section}</div>}
+                    <label className="lbl">{f.label}{f.required && <span style={{ color: "var(--redT)" }}> *</span>}
+                      {f.max && <span className="mono" style={{ float: "right", color: len > f.max ? "var(--redT)" : "var(--ink3)" }}>{len}/{f.max}</span>}</label>
+                    {f.kind === "static" ? <div style={{ padding: "7px 0", fontSize: 13 }}>{me.name}</div>
+                    : f.kind === "multi" ? (
+                      <div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", padding: "4px 0" }}>
+                          {f.options.map((opt) => {
+                            const on = (v || []).includes(opt);
+                            return (
+                              <label key={opt} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, cursor: "pointer" }}>
+                                <input type="checkbox" style={{ width: "auto" }} checked={on}
+                                  onChange={() => setAppForm({ ...appForm, [f.key]: on ? (v || []).filter((x) => x !== opt) : [...(v || []), opt] })} />{opt}
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {f.other && <input style={{ marginTop: 6 }} className={appErrs[f.key] ? "err" : ""} value={appForm[`${f.key}_other`] || ""}
+                          onChange={(e) => setAppForm({ ...appForm, [`${f.key}_other`]: e.target.value })} placeholder="기타 (직접 입력)" />}
+                        {appErrs[f.key] && <div className="errmsg">하나 이상 선택하거나 기타에 적어 주세요.</div>}
+                      </div>
+                    ) : f.kind === "textarea"
+                      ? <textarea rows={f.rows || 4} className={appErrs[f.key] ? "err" : ""} value={v || ""} placeholder={f.placeholder} onChange={(e) => setAppForm({ ...appForm, [f.key]: e.target.value })} />
+                      : <input type="text" className={appErrs[f.key] ? "err" : ""} value={v || ""} placeholder={f.placeholder} onChange={(e) => setAppForm({ ...appForm, [f.key]: e.target.value })} />}
+                    {typeof appErrs[f.key] === "string" && <div className="errmsg">{appErrs[f.key]}로 줄여 주세요.</div>}
+                  </div>
+                );
+              })}
               <div style={{ marginBottom: 16 }}>
-                <label className="lbl">희망 전문가 (선택)</label>
-                <input value={appForm.expertPref || ""} onChange={(e) => setAppForm({ ...appForm, expertPref: e.target.value })} placeholder="원하는 전문가가 있으면 이름·소속을 적어 주세요. 비워두면 사무국이 배정합니다." />
+                <label className="lbl">희망 컨설턴트</label>
+                <input value={appForm.expertPref || ""} onChange={(e) => setAppForm({ ...appForm, expertPref: e.target.value })} placeholder="성함" />
+                <div style={{ fontSize: 11, color: "var(--ink3)", marginTop: 5 }}>{EXPERT_PREF_HINT}</div>
               </div>
               <button className="b1" onClick={saveApp}>{app ? "수정 저장" : "신청서 제출"}</button>
-              {app && <button className="b2" style={{ marginLeft: 8 }} onClick={() => { setAppForm({ ...app.data, expertPref: app.expertPref }); setEditApp(false); }}>취소</button>}
+              {app && <button className="b2" style={{ marginLeft: 8 }} onClick={() => { setAppForm(blankApp(app)); setEditApp(false); }}>취소</button>}
             </div>
           )}
         </div>
