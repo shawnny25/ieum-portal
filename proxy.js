@@ -18,4 +18,4 @@ export async function proxy(request) {
   if (!user && request.nextUrl.pathname !== "/login") return NextResponse.redirect(new URL("/login", request.url));
   return res;
 }
-export const config = { matcher: ["/((?!_next|favicon.ico|api).*)"] };
+export const config = { matcher: ["/((?!_next|api|.*\..*).*)"] };   // 확장자 있는 정적 파일(로고 등)은 제외
