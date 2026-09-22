@@ -329,3 +329,9 @@ create policy org_sel_shared on avail for select to authenticated
          and (select expert_id from orgs where id = avail.org_id) = my_expert());
 create policy org_sel_shared on confirms for select to authenticated
   using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null and expert_id = my_expert());
+
+-- ───────── 사업예산 총액·항목 전환·외부 변경금액 (2026-09-22 추가) ─────────
+alter table orgs add column if not exists budget_total bigint not null default 0;
+alter table orgs add column if not exists budget_year bigint not null default 0;
+alter table budgets add column if not exists item_to text not null default '';
+alter table docs add column if not exists amount bigint not null default 0;

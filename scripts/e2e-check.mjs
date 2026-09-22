@@ -53,6 +53,9 @@ try {
   assert(!me, me?.message); ok("담당자 정보 수정");
   const { error: ne } = await org.from("orgs").update({ name: "이름바꾸기" }).eq("id", mine.id);
   assert(ne && /manager only/.test(ne.message), "기관명 변경이 막혀야 함: " + ne?.message); ok("기관명은 못 바꿈 (트리거)");
+  assert((await org.from("orgs").update({ budget_year: 999 }).eq("id", mine.id)).error); ok("예산 총액은 기관이 못 바꿈");
+  assert(!(await org.from("budgets").insert({ org_id: mine.id, round: 1, date: "2027.03.02", doc_no: "t", level: "세세목", item: "강사비", item_to: "다과비", before_amt: 100, after_amt: 50, reason: "e2e" })).error); ok("내부 예산변경(항목 전환) 등록");
+  assert(!(await org.from("docs").insert({ org_id: mine.id, kind: "budget", name: "e2e.pdf", path: `org-${mine.id}/e2e.pdf`, reason: "e2e", amount: 3200000 })).error); ok("승인 문서(변경 금액) 등록");
 
   // 5. 스토리지 격리
   const blob = new Blob(["hello"], { type: "text/plain" });

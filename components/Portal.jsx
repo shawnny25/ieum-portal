@@ -64,6 +64,10 @@ const patchConsultType = (key, patch) => {
   const consult_types = c.consult_types.map((t) => (t.key === key ? { ...t, ...patch } : t));
   return run(sb.from("settings").update({ data: { ...c, consult_types }, updated_at: new Date().toISOString() }).eq("id", 1));
 };
+// 예산변경 누적: 증감 부호와 무관하게 절댓값 합산. 외부(승인 문서)는 입력한 변경 금액.
+const absSum = (rows) => rows.reduce((a, r) => a + Math.abs(Number(r.afterAmt) - Number(r.beforeAmt)), 0);
+const extSum = (docs) => docs.filter((d) => d.kind === "budget").reduce((a, d) => a + Math.abs(Number(d.amount) || 0), 0);
+const CHANGE_LIMIT = 0.2;   // 내부 + 외부 누적 변경 한도 (당해년도 예산 대비)
 const dueFix = () => { const d = new Date(); d.setDate(d.getDate() + FIX_DAYS); return d.toISOString().slice(0, 10); };
 
 /* ─────────── 소품 ─────────── */
@@ -1067,6 +1071,7 @@ function OrgConsult({ db, reload, say, log, me }) {
   const pre = db.pre[me.id] || { rate: "", progress: "", country: "", ask: "" };
   const [form, setForm] = useState(pre);
   const [errs, setErrs] = useState({});
+  const [editPre, setEditPre] = useState(!db.pre[me.id]);   // 저장된 내용이 있으면 열람 모드로 시작
 
   useEffect(() => {
     setPicks(db.avail.filter((a) => a.orgId === me.id && a.type === type).sort(byRank).map(slotKey));
@@ -1097,7 +1102,7 @@ function OrgConsult({ db, reload, say, log, me }) {
     try {
       await run(sb.from("pre").upsert({ org_id: me.id, rate: String(form.rate), progress: form.progress, country: form.country, ask: form.ask || "", at: new Date().toISOString() }));
     } catch (e) { say(`저장 실패: ${e.message}`); return; }
-    reload();
+    reload(); setEditPre(false);
     say("컨설팅 사전 정보를 저장했습니다. 전문가와 사무국이 열람합니다.");
   };
 
@@ -1167,8 +1172,20 @@ function OrgConsult({ db, reload, say, log, me }) {
 
       <div className="card">
         <div className="chd"><h3>컨설팅 사전 정보</h3>
-          <span style={{ fontSize: 11, color: "var(--ink3)" }}>
-            {db.pre[me.id] ? `최근 저장 ${db.pre[me.id].at}` : "컨설팅 전 미리 작성해 주세요"}</span></div>
+          <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "var(--ink3)" }}>
+            {db.pre[me.id] ? `최근 저장 ${db.pre[me.id].at}` : "컨설팅 전 미리 작성해 주세요"}
+            {!editPre && <button className="b2 bs" onClick={() => { setForm(db.pre[me.id]); setEditPre(true); }}>수정</button>}
+          </span></div>
+        {!editPre ? (
+          <div style={{ padding: 18 }}>
+            {[["1. 예산 집행률", `${pre.rate}%`], ["2. 세부활동별 사업 진행현황", pre.progress], ["3. 사업대상국 현지 여건 및 주요 이슈", pre.country], ["4. 전문가 자문 요청사항", pre.ask]].map(([l, v]) => (
+              <div key={l} style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>{l}</div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{v || "—"}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div style={{ padding: 18 }}>
           <div style={{ marginBottom: 14 }}>
             <label className="lbl">1. 예산 집행률 — 연간 총 예산 대비 집행률 (%)</label>
@@ -1196,7 +1213,9 @@ function OrgConsult({ db, reload, say, log, me }) {
               placeholder="컨설팅에서 다루고 싶은 고민점을 적어 주세요." />
           </div>
           <button className="b1" onClick={savePre}>사전 정보 저장</button>
+          {db.pre[me.id] && <button className="b2" style={{ marginLeft: 8 }} onClick={() => setEditPre(false)}>취소</button>}
         </div>
+        )}
       </div>
     </div>
   );
@@ -1206,63 +1225,92 @@ function OrgConsult({ db, reload, say, log, me }) {
 
 function OrgBudget({ db, reload, say, log, me }) {
   const [tab, setTab] = useState("inner");
+  const o = orgOf(me.id);
   const rows = db.budgets[me.id] || [];
-  const [f, setF] = useState({ round: "", date: "", docNo: "", level: "세세목", item: "",
-    beforeBasis: "", beforeAmt: "", afterBasis: "", afterAmt: "", reason: "",
-    newItem: false, cross: false, plan: false });
-  const [errs, setErrs] = useState({});
+  const myDocs = db.docs.filter((d) => d.orgId === me.id);
+  const cumIn = absSum(rows), cumEx = extSum(myDocs), cum = cumIn + cumEx;
+  const limit = o.budgetYear ? Math.floor(o.budgetYear * CHANGE_LIMIT) : 0;
+  const pct = (n) => o.budgetYear ? (n / o.budgetYear) * 100 : 0;
 
-  const diff = (r) => Number(r.afterAmt) - Number(r.beforeAmt);
-  const cum = rows.reduce((a, r) => a + Math.max(0, diff(r)), 0);
-  const newDiff = (Number(f.afterAmt) || 0) - (Number(f.beforeAmt) || 0);
-  const projCum = cum + Math.max(0, newDiff);
+  const blank = () => ({ level: "세세목", item: "", itemTo: "", beforeBasis: "", beforeAmt: "", afterBasis: "", afterAmt: "", reason: "" });
+  const nextRound = rows.length ? Math.max(...rows.map((r) => Number(r.round) || 0)) + 1 : 1;
+  const [h, setH] = useState({ round: String(nextRound), date: "", docNo: "", newItem: false, cross: false, plan: false });
+  const [items, setItems] = useState([blank()]);
+  const [errs, setErrs] = useState({});
+  const upItem = (i, patch) => setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const diffOf = (x) => (Number(x.afterAmt) || 0) - (Number(x.beforeAmt) || 0);
+  const newAbs = items.reduce((a, x) => a + Math.abs(diffOf(x)), 0);
+  const projIn = cumIn + newAbs;            // 내부 누적 (1천만원 승인 기준)
+  const projAll = cum + newAbs;             // 내부 + 외부 누적 (20% 한도 기준)
+  const over20 = !!o.budgetYear && projAll > limit;
 
   const triggers = [];
-  if (projCum > APPROVAL_THRESHOLD) triggers.push(`예산변경 누적금액이 1천만원을 초과합니다 (${won(projCum)}원)`);
-  if (f.cross) triggers.push("목(세목) 간 전용이 발생합니다");
-  if (f.newItem) triggers.push("신규 세목·세세목이 추가됩니다");
-  if (f.plan) triggers.push("국내/현지 예산계획 자체가 변경됩니다");
+  if (projIn > APPROVAL_THRESHOLD) triggers.push(`내부 예산변경 누적금액이 1천만원을 초과합니다 (${won(projIn)}원)`);
+  if (h.cross) triggers.push("목(세목) 간 전용이 발생합니다");
+  if (h.newItem) triggers.push("신규 세목·세세목이 추가됩니다");
+  if (h.plan) triggers.push("국내/현지 예산계획 자체가 변경됩니다");
 
   const add = async () => {
     const e = {};
-    if (!f.round) e.round = "차수를 입력해 주세요.";
-    if (!f.date.trim()) e.date = "내부 변경일을 입력해 주세요.";
-    if (!f.docNo.trim()) e.docNo = "내부기안 문서번호를 입력해 주세요.";
-    if (!f.item.trim()) e.item = "변경 대상 항목을 입력해 주세요.";
-    if (f.beforeAmt === "" || isNaN(Number(f.beforeAmt))) e.beforeAmt = "변경 전 금액을 숫자로 입력해 주세요.";
-    if (f.afterAmt === "" || isNaN(Number(f.afterAmt))) e.afterAmt = "변경 후 금액을 숫자로 입력해 주세요.";
-    if (!f.reason.trim()) e.reason = "변경 사유는 필수 입력입니다.";
+    if (!h.round) e.round = "차수";
+    if (!h.date) e.date = "내부 변경일";
+    if (!h.docNo.trim()) e.docNo = "문서번호";
+    items.forEach((x, i) => {
+      if (!x.item.trim()) e[`item${i}`] = 1;
+      if (x.beforeAmt === "" || isNaN(Number(x.beforeAmt))) e[`before${i}`] = 1;
+      if (x.afterAmt === "" || isNaN(Number(x.afterAmt))) e[`after${i}`] = 1;
+      if (!x.reason.trim()) e[`reason${i}`] = 1;
+    });
     setErrs(e);
     if (Object.keys(e).length) { say("입력하지 않은 필수 항목이 있습니다."); return; }
+    if (over20) { say(`당해년도 사업예산의 ${CHANGE_LIMIT * 100}%를 초과하는 변경은 등록할 수 없습니다.`); return; }
     if (triggers.length) { say("승인이 필요한 변경입니다. 아래 안내를 확인하고 승인 문서를 제출해 주세요."); return; }
     try {
-      await run(sb.from("budgets").insert({ org_id: me.id, round: Number(f.round), date: f.date.trim(), doc_no: f.docNo.trim(), level: f.level,
-        item: f.item.trim(), before_basis: f.beforeBasis, before_amt: Number(f.beforeAmt), after_basis: f.afterBasis, after_amt: Number(f.afterAmt),
-        reason: f.reason.trim(), new_item: f.newItem, cross_item: f.cross, plan: f.plan }));
-    } catch (e) { say(`저장 실패: ${e.message}`); return; }
+      await run(sb.from("budgets").insert(items.map((x) => ({ org_id: me.id, round: Number(h.round), date: h.date, doc_no: h.docNo.trim(), level: x.level,
+        item: x.item.trim(), item_to: x.itemTo.trim(), before_basis: x.beforeBasis, before_amt: Number(x.beforeAmt), after_basis: x.afterBasis, after_amt: Number(x.afterAmt),
+        reason: x.reason.trim(), new_item: h.newItem, cross_item: h.cross, plan: h.plan }))));
+      await log("내부 예산변경 등록", `${h.round}차 · ${items.length}건 · ${won(newAbs)}원`);
+    } catch (e2) { say(`저장 실패: ${e2.message}`); return; }
     reload();
-    setF({ round: "", date: "", docNo: "", level: "세세목", item: "", beforeBasis: "", beforeAmt: "",
-      afterBasis: "", afterAmt: "", reason: "", newItem: false, cross: false, plan: false });
-    say("내부 예산변경 내역을 등록했습니다. 승인 절차 없이 즉시 반영됩니다.");
+    setH({ round: String(Number(h.round) + 1), date: "", docNo: "", newItem: false, cross: false, plan: false });
+    setItems([blank()]);
+    say(`${h.round}차 내부 예산변경 ${items.length}건을 등록했습니다.`);
   };
 
   const del = (id) => run(sb.from("budgets").delete().eq("id", id)).then(reload).catch((e) => say(`삭제 실패: ${e.message}`));
 
-  const myDocs = db.docs.filter((d) => d.orgId === me.id);
-
-  const upload = async (kind, files, reason) => {
+  const upload = async (kind, files, reason, amount) => {
+    if (kind === "budget" && o.budgetYear && cum + amount > limit) {
+      say(`이 변경을 더하면 누적 변경액이 당해년도 예산의 ${CHANGE_LIMIT * 100}%를 초과합니다 (한도 ${won(limit)}원).`); throw new Error("limit");
+    }
     try {
       const [f0] = await uploadFiles(`org-${me.id}/docs`, files);
-      await run(sb.from("docs").insert({ org_id: me.id, kind, name: f0.n, size: f0.s, path: f0.path, reason }));
+      await run(sb.from("docs").insert({ org_id: me.id, kind, name: f0.n, size: f0.s, path: f0.path, reason, amount: kind === "budget" ? amount : 0 }));
       await log(kind === "budget" ? "예산변경 승인 신청" : "사업변경 승인 신청", f0.n);
     } catch (e) { say(`제출 실패: ${e.message}`); throw e; }
     reload();
     say("승인 신청 문서를 제출했습니다. 사무국 검토 후 결과가 안내됩니다.");
   };
 
+  const Stat = ({ l, v, sub, warn }) => (
+    <div style={{ flex: 1, padding: "0 16px", borderLeft: "1px solid var(--line2)" }}>
+      <div style={{ fontSize: 11, color: "var(--ink2s)" }}>{l}</div>
+      <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: warn ? "var(--redT)" : "var(--ink)" }}>{v}</div>
+      {sub && <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>{sub}</div>}
+    </div>
+  );
+
   return (
     <div>
       <PageHead title="예산변경 / 사업변경" sub="기관 내부 변경은 직접 입력하고, 승인이 필요한 변경은 문서로 제출합니다." />
+
+      <div className="card" style={{ display: "flex", padding: "14px 0", marginBottom: 14 }}>
+        <Stat l="3개년 사업예산 총액" v={o.budgetTotal ? `${won(o.budgetTotal)}원` : "—"} sub="사무국 등록" />
+        <Stat l={`${o.year}차년도 사업예산 총액`} v={o.budgetYear ? `${won(o.budgetYear)}원` : "—"} sub="사무국 등록" />
+        <Stat l="누적 변경액 (내부 + 승인 문서)" v={`${won(cum)}원`} sub={`내부 ${won(cumIn)} · 문서 ${won(cumEx)}`} warn={over20 && cum > limit} />
+        <Stat l={`누적 변경 비율 (한도 ${CHANGE_LIMIT * 100}%)`} v={o.budgetYear ? `${pct(cum).toFixed(1)}%` : "—"}
+          sub={o.budgetYear ? `한도 ${won(limit)}원 · 잔여 ${won(Math.max(0, limit - cum))}원` : "당해년도 예산이 등록되면 계산됩니다"} warn={cum > limit && !!o.budgetYear} />
+      </div>
 
       <div className="tabs">
         <div className={`tb ${tab === "inner" ? "tb-on" : ""}`} onClick={() => setTab("inner")}>기관 내부 예산변경</div>
@@ -1277,35 +1325,35 @@ function OrgBudget({ db, reload, say, log, me }) {
       {tab === "inner" ? (
         <>
           <div className="card note" style={{ background: "var(--blue)", color: "#2A4C82", marginBottom: 14 }}>
-            내부 결재로 처리하는 예산변경입니다. 사무국 승인 없이 기관이 직접 입력·수정합니다.
-            증감내역과 누적금액은 금액 입력 시 자동 계산됩니다.
+            내부 결재로 처리하는 예산변경입니다. 사무국 승인 없이 기관이 직접 입력합니다.
+            누적금액은 증감의 부호와 관계없이 변경된 금액의 절댓값을 더해 계산하며, 승인 문서로 제출한 변경액과 합쳐 당해년도 예산의 {CHANGE_LIMIT * 100}%를 넘을 수 없습니다.
           </div>
 
           <div className="card" style={{ marginBottom: 14, overflowX: "auto" }}>
             <div className="chd"><h3>내부 예산변경 내역</h3>
-              <span style={{ fontSize: 11.5 }}>누적 <b className="mono" style={{ color: cum > APPROVAL_THRESHOLD ? "var(--redT)" : "var(--ink)" }}>
-                {won(cum)}</b>원 / 1천만원</span></div>
-            <table style={{ minWidth: 900 }}>
-              <thead><tr><th>차수</th><th>내부 변경일</th><th>문서번호</th><th>구분</th><th>변경 전</th><th>변경 후</th>
+              <span style={{ fontSize: 11.5 }}>내부 누적 <b className="mono" style={{ color: cumIn > APPROVAL_THRESHOLD ? "var(--redT)" : "var(--ink)" }}>
+                {won(cumIn)}</b>원 / 1천만원</span></div>
+            <table style={{ minWidth: 960 }}>
+              <thead><tr><th>차수</th><th>내부 변경일</th><th>문서번호</th><th>구분 · 항목</th><th>변경 전</th><th>변경 후</th>
                 <th style={{ textAlign: "right" }}>증감내역</th><th style={{ textAlign: "right" }}>누적금액</th><th>사유</th><th /></tr></thead>
               <tbody>
                 {rows.map((r, i) => {
-                  const d2 = diff(r);
-                  const run = rows.slice(0, i + 1).reduce((a, x) => a + Math.max(0, diff(x)), 0);
+                  const d2 = Number(r.afterAmt) - Number(r.beforeAmt);
+                  const running = absSum(rows.slice(0, i + 1));
                   return (
                     <tr key={r.id}>
                       <td className="mono">{r.round}차</td>
                       <td className="mono" style={{ color: "var(--ink2s)" }}>{r.date}</td>
                       <td className="mono" style={{ fontSize: 11.5, color: "var(--ink2s)" }}>{r.docNo}</td>
                       <td><span className="bg g-not">{r.level}</span>
-                        <div style={{ fontSize: 11, color: "var(--ink2s)", marginTop: 3 }}>{r.item}</div></td>
+                        <div style={{ fontSize: 11, color: "var(--ink2s)", marginTop: 3 }}>{r.item}{r.itemTo && <> <b>→</b> {r.itemTo}</>}</div></td>
                       <td style={{ fontSize: 11.5 }}>{r.beforeBasis}
                         <div className="mono" style={{ color: "var(--ink2s)" }}>{won(r.beforeAmt)}원</div></td>
                       <td style={{ fontSize: 11.5 }}>{r.afterBasis}
                         <div className="mono" style={{ color: "var(--ink2s)" }}>{won(r.afterAmt)}원</div></td>
                       <td className="mono" style={{ textAlign: "right", color: d2 > 0 ? "var(--greenT)" : d2 < 0 ? "var(--redT)" : "var(--ink3)" }}>
                         {d2 > 0 ? "+" : ""}{won(d2)}</td>
-                      <td className="mono" style={{ textAlign: "right", color: "var(--ink2s)" }}>{won(run)}</td>
+                      <td className="mono" style={{ textAlign: "right", color: "var(--ink2s)" }}>{won(running)}</td>
                       <td style={{ fontSize: 11.5, color: "var(--ink2s)" }}>{r.reason}</td>
                       <td><button className="b2 bs" onClick={() => del(r.id)}>삭제</button></td>
                     </tr>
@@ -1319,58 +1367,74 @@ function OrgBudget({ db, reload, say, log, me }) {
 
           <div className="card" style={{ padding: 18 }}>
             <h3 style={{ margin: "0 0 14px", fontSize: 13.5 }}>내역 추가</h3>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
               <div style={{ width: 80 }}><label className="lbl">차수</label>
-                <input className={errs.round ? "err" : ""} value={f.round} onChange={(e) => setF({ ...f, round: e.target.value })} placeholder="3" /></div>
-              <div style={{ width: 130 }}><label className="lbl">내부 변경일</label>
-                <input className={errs.date ? "err" : ""} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} placeholder="2026.09.10" /></div>
-              <div style={{ width: 160 }}><label className="lbl">문서번호 (내부기안)</label>
-                <input className={errs.docNo ? "err" : ""} value={f.docNo} onChange={(e) => setF({ ...f, docNo: e.target.value })} placeholder="기관-2026-052" /></div>
-              <div style={{ width: 100 }}><label className="lbl">구분</label>
-                <select value={f.level} onChange={(e) => setF({ ...f, level: e.target.value })}>
-                  {BUDGET_LEVELS.map((l) => <option key={l}>{l}</option>)}</select></div>
-              <div style={{ flex: 1 }}><label className="lbl">변경 대상 항목</label>
-                <input className={errs.item ? "err" : ""} value={f.item} onChange={(e) => setF({ ...f, item: e.target.value })}
-                  placeholder="사업비 &gt; 교육운영비 &gt; 강사료" /></div>
+                <input className={errs.round ? "err" : ""} value={h.round} onChange={(e) => setH({ ...h, round: e.target.value.replace(/[^0-9]/g, "") })} /></div>
+              <div style={{ width: 170 }}><label className="lbl">내부 변경일</label>
+                <input type="date" className={errs.date ? "err" : ""} value={h.date ? iso(h.date) : ""} onChange={(e) => setH({ ...h, date: fmt(e.target.value) })} /></div>
+              <div style={{ width: 180 }}><label className="lbl">문서번호 (내부기안)</label>
+                <input className={errs.docNo ? "err" : ""} value={h.docNo} onChange={(e) => setH({ ...h, docNo: e.target.value })} placeholder="기관-2027-052" /></div>
+              <div style={{ flex: 1, display: "flex", gap: 16, alignItems: "flex-end", paddingBottom: 6, fontSize: 12 }}>
+                {[["cross", "목(세목) 간 전용"], ["newItem", "신규 세목·세세목 추가"], ["plan", "국내/현지 예산계획 변경"]].map(([k, l]) => (
+                  <label key={k} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="checkbox" style={{ width: "auto" }} checked={h[k]} onChange={(e) => setH({ ...h, [k]: e.target.checked })} />{l}
+                  </label>
+                ))}
+              </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <div style={{ flex: 1 }}><label className="lbl">변경 전 산출근거</label>
-                <input value={f.beforeBasis} onChange={(e) => setF({ ...f, beforeBasis: e.target.value })} placeholder="50,000원 × 20회" /></div>
-              <div style={{ width: 140 }}><label className="lbl">변경 전 금액</label>
-                <input className={errs.beforeAmt ? "err" : ""} value={f.beforeAmt}
-                  onChange={(e) => setF({ ...f, beforeAmt: e.target.value.replace(/[^0-9]/g, "") })} placeholder="1000000" /></div>
-              <div style={{ flex: 1 }}><label className="lbl">변경 후 산출근거</label>
-                <input value={f.afterBasis} onChange={(e) => setF({ ...f, afterBasis: e.target.value })} placeholder="50,000원 × 26회" /></div>
-              <div style={{ width: 140 }}><label className="lbl">변경 후 금액</label>
-                <input className={errs.afterAmt ? "err" : ""} value={f.afterAmt}
-                  onChange={(e) => setF({ ...f, afterAmt: e.target.value.replace(/[^0-9]/g, "") })} placeholder="1300000" /></div>
-            </div>
+            {items.map((x, i) => {
+              const d = diffOf(x);
+              return (
+                <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12, marginBottom: 10, background: "#FCFDFF" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                    <b style={{ fontSize: 12 }}>항목 {i + 1}</b>
+                    <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+                      <span>증감 <b className="mono" style={{ color: d > 0 ? "var(--greenT)" : d < 0 ? "var(--redT)" : "var(--ink3)" }}>{d > 0 ? "+" : ""}{won(d)}원</b></span>
+                      {items.length > 1 && <button className="b2 bs" onClick={() => setItems(items.filter((_, j) => j !== i))}>항목 삭제</button>}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <div style={{ width: 100 }}><label className="lbl">구분</label>
+                      <select value={x.level} onChange={(e) => upItem(i, { level: e.target.value })}>
+                        {BUDGET_LEVELS.map((l) => <option key={l}>{l}</option>)}</select></div>
+                    <div style={{ flex: 1 }}><label className="lbl">변경 전 항목</label>
+                      <input className={errs[`item${i}`] ? "err" : ""} value={x.item} onChange={(e) => upItem(i, { item: e.target.value })} placeholder="사업비 > 교육운영비 > 강사비" /></div>
+                    <div style={{ alignSelf: "flex-end", paddingBottom: 8, color: "var(--ink3)" }}>→</div>
+                    <div style={{ flex: 1 }}><label className="lbl">변경 후 항목 (전용 시 · 같은 항목이면 비워두기)</label>
+                      <input value={x.itemTo} onChange={(e) => upItem(i, { itemTo: e.target.value })} placeholder="사업비 > 교육운영비 > 다과비" /></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}><label className="lbl">변경 전 산출근거</label>
+                      <input value={x.beforeBasis} onChange={(e) => upItem(i, { beforeBasis: e.target.value })} placeholder="50,000원 × 20회" /></div>
+                    <div style={{ width: 140 }}><label className="lbl">변경 전 금액</label>
+                      <input className={errs[`before${i}`] ? "err" : ""} value={x.beforeAmt} onChange={(e) => upItem(i, { beforeAmt: e.target.value.replace(/[^0-9]/g, "") })} placeholder="1000000" /></div>
+                    <div style={{ flex: 1 }}><label className="lbl">변경 후 산출근거</label>
+                      <input value={x.afterBasis} onChange={(e) => upItem(i, { afterBasis: e.target.value })} placeholder="50,000원 × 26회" /></div>
+                    <div style={{ width: 140 }}><label className="lbl">변경 후 금액</label>
+                      <input className={errs[`after${i}`] ? "err" : ""} value={x.afterAmt} onChange={(e) => upItem(i, { afterAmt: e.target.value.replace(/[^0-9]/g, "") })} placeholder="1300000" /></div>
+                  </div>
+                  <div><label className="lbl">변경 사유</label>
+                    <input className={errs[`reason${i}`] ? "err" : ""} value={x.reason} onChange={(e) => upItem(i, { reason: e.target.value })} placeholder="교육 회차 확대에 따른 강사료 증액" /></div>
+                </div>
+              );
+            })}
+            <button className="b2 bs" style={{ marginBottom: 12 }} onClick={() => setItems([...items, blank()])}>+ 같은 차수에 항목 추가</button>
 
-            <div style={{ display: "flex", gap: 14, alignItems: "center", padding: "10px 12px",
-              background: "#FAFBFE", borderRadius: 6, marginBottom: 10, fontSize: 12 }}>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", padding: "10px 12px", background: "#FAFBFE", borderRadius: 6, marginBottom: 10, fontSize: 12, flexWrap: "wrap" }}>
               <span style={{ color: "var(--ink2s)" }}>자동 계산</span>
-              <span>증감내역 <b className="mono" style={{ color: newDiff > 0 ? "var(--greenT)" : newDiff < 0 ? "var(--redT)" : "var(--ink3)" }}>
-                {newDiff > 0 ? "+" : ""}{won(newDiff)}원</b></span>
-              <span>예산변경 누적금액 <b className="mono" style={{ color: projCum > APPROVAL_THRESHOLD ? "var(--redT)" : "var(--ink)" }}>
-                {won(projCum)}원</b></span>
+              <span>이번 차수 변경액 <b className="mono">{won(newAbs)}원</b></span>
+              <span>내부 누적 <b className="mono" style={{ color: projIn > APPROVAL_THRESHOLD ? "var(--redT)" : "var(--ink)" }}>{won(projIn)}원</b></span>
+              <span>내부 + 문서 누적 <b className="mono" style={{ color: over20 ? "var(--redT)" : "var(--ink)" }}>{won(projAll)}원</b>
+                {o.budgetYear ? <> ({pct(projAll).toFixed(1)}%)</> : null}</span>
             </div>
 
-            <div style={{ display: "flex", gap: 16, marginBottom: 10, fontSize: 12 }}>
-              {[["cross", "목(세목) 간 전용"], ["newItem", "신규 세목·세세목 추가"], ["plan", "국내/현지 예산계획 변경"]].map(([k, l]) => (
-                <label key={k} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input type="checkbox" style={{ width: "auto" }} checked={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.checked })} />
-                  {l}
-                </label>
-              ))}
-            </div>
-
-            <div style={{ marginBottom: 12 }}><label className="lbl">변경 사유</label>
-              <input className={errs.reason ? "err" : ""} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })}
-                placeholder="교육 회차 확대에 따른 강사료 증액" />
-              {errs.reason && <div className="errmsg">{errs.reason}</div>}</div>
-
-            {triggers.length > 0 && (
+            {over20 && (
+              <div className="note" style={{ background: "var(--red)", color: "var(--redT)", marginBottom: 12 }}>
+                <b>등록할 수 없습니다.</b> 내부 변경과 승인 문서 변경을 합친 누적액이 당해년도 사업예산의 {CHANGE_LIMIT * 100}%(한도 {won(limit)}원)를 초과합니다.
+              </div>
+            )}
+            {!over20 && triggers.length > 0 && (
               <div className="note" style={{ background: "var(--red)", color: "var(--redT)", marginBottom: 12 }}>
                 <b>승인 대상 변경입니다 — 내부 예산변경으로 처리할 수 없습니다.</b>
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
@@ -1382,7 +1446,7 @@ function OrgBudget({ db, reload, say, log, me }) {
               </div>
             )}
 
-            <button className="b1" onClick={add} disabled={triggers.length > 0}>내역 추가</button>
+            <button className="b1" onClick={add} disabled={over20 || triggers.length > 0}>{items.length}건 내역 추가</button>
           </div>
         </>
       ) : (
@@ -1390,13 +1454,14 @@ function OrgBudget({ db, reload, say, log, me }) {
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="chd"><h3>제출 문서</h3></div>
             <table>
-              <thead><tr><th>구분</th><th>문서</th><th>변경 사유</th><th>제출일</th><th>상태</th></tr></thead>
+              <thead><tr><th>구분</th><th>문서</th><th>변경 사유</th><th style={{ textAlign: "right" }}>변경 금액</th><th>제출일</th><th>상태</th></tr></thead>
               <tbody>
                 {myDocs.map((d) => (
                   <tr key={d.id}>
                     <td><span className="bg g-sub">{d.kind === "budget" ? "예산변경" : "사업변경"}</span></td>
                     <td>{d.name}<span className="mono" style={{ color: "var(--ink3)", marginLeft: 7 }}>{mb(d.size)}</span></td>
                     <td style={{ color: "var(--ink2s)" }}>{d.reason}</td>
+                    <td className="mono" style={{ textAlign: "right" }}>{d.kind === "budget" ? `${won(d.amount)}원` : "—"}</td>
                     <td className="mono" style={{ color: "var(--ink3)" }}>{d.at}</td>
                     <td>{d.status === "approved"
                       ? <><span className="bg g-app">승인</span>
@@ -1404,7 +1469,7 @@ function OrgBudget({ db, reload, say, log, me }) {
                       : <span className="bg g-req">승인 대기</span>}</td>
                   </tr>
                 ))}
-                {!myDocs.length && <tr><td colSpan={5} style={{ textAlign: "center", padding: 32, color: "var(--ink3)" }}>
+                {!myDocs.length && <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--ink3)" }}>
                   제출한 문서가 없습니다.</td></tr>}
               </tbody>
             </table>
@@ -1419,6 +1484,7 @@ function OrgBudget({ db, reload, say, log, me }) {
 function DocUpload({ onUpload }) {
   const [kind, setKind] = useState("budget");
   const [reason, setReason] = useState("");
+  const [amount, setAmount] = useState("");
   const [err, setErr] = useState("");
   return (
     <div className="card" style={{ padding: 18 }}>
@@ -1427,15 +1493,18 @@ function DocUpload({ onUpload }) {
         <div style={{ width: 150 }}><label className="lbl">구분</label>
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             <option value="budget">예산변경</option><option value="project">사업변경</option></select></div>
+        {kind === "budget" && <div style={{ width: 170 }}><label className="lbl">변경 금액 (원, 절댓값)</label>
+          <input className={err === "amount" ? "err" : ""} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))} placeholder="3200000" /></div>}
         <div style={{ flex: 1 }}><label className="lbl">변경 사유 (요약)</label>
-          <input className={err ? "err" : ""} value={reason} onChange={(e) => setReason(e.target.value)}
+          <input className={err === "reason" ? "err" : ""} value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder="목 간 전용 발생 (사업비 → 인건비 3,200,000원)" />
-          {err && <div className="errmsg">{err}</div>}</div>
+          {err && <div className="errmsg">{err === "amount" ? "변경 금액을 입력해 주세요." : "변경 사유를 입력해 주세요."}</div>}</div>
       </div>
       <Uploader label="승인 신청 제출"
         onDone={async (files) => {
-          if (!reason.trim()) { setErr("변경 사유를 입력해 주세요."); throw new Error("reason"); }
-          setErr(""); await onUpload(kind, files, reason.trim()); setReason("");
+          if (!reason.trim()) { setErr("reason"); throw new Error("reason"); }
+          if (kind === "budget" && !Number(amount)) { setErr("amount"); throw new Error("amount"); }
+          setErr(""); await onUpload(kind, files, reason.trim(), Number(amount) || 0); setReason(""); setAmount("");
         }} />
     </div>
   );
@@ -1447,6 +1516,7 @@ function AdminBudget({ db, reload, say, log, who }) {
   const [tab, setTab] = useState("pending");
   const list = db.docs.filter((d) => tab === "pending" ? d.status === "pending" : d.status === "approved");
   const [memo, setMemo] = useState({});
+  const [bud, setBud] = useState({});   // {orgId: {total, year}} 편집 중인 값
 
   const approve = async (doc) => {
     try {
@@ -1458,43 +1528,81 @@ function AdminBudget({ db, reload, say, log, who }) {
     say(`승인 처리했습니다. ${orgOf(doc.orgId).name}에 알림이 전달됩니다.`);
   };
 
-  const innerRows = Object.entries(db.budgets).map(([oid, rows]) => {
-    const cum = rows.reduce((a, r) => a + Math.max(0, Number(r.afterAmt) - Number(r.beforeAmt)), 0);
-    return { oid: Number(oid), n: rows.length, cum };
+  const saveBudget = async (o) => {
+    const v = bud[o.id]; if (!v) return;
+    try {
+      await run(sb.from("orgs").update({ budget_total: Number(v.total) || 0, budget_year: Number(v.year) || 0 }).eq("id", o.id));
+      await log("사업예산 총액 등록", `${o.name} · 3개년 ${won(v.total)} · 당해년도 ${won(v.year)}`);
+    } catch (e) { say(`저장 실패: ${e.message}`); return; }
+    setBud({ ...bud, [o.id]: undefined }); reload(); say(`${o.name} 예산 총액을 저장했습니다.`);
+  };
+
+  const status = db.orgList.map((o) => {
+    const inn = absSum(db.budgets[o.id] || []), ex = extSum(db.docs.filter((d) => d.orgId === o.id));
+    const limit = Math.floor(o.budgetYear * CHANGE_LIMIT);
+    return { o, n: (db.budgets[o.id] || []).length, inn, ex, sum: inn + ex, limit, pct: o.budgetYear ? ((inn + ex) / o.budgetYear) * 100 : null };
   });
 
   return (
     <div>
-      <PageHead title="예산변경 / 사업변경" sub="기관이 제출한 승인 신청 문서를 검토하고 승인 처리하세요." />
+      <PageHead title="예산변경 / 사업변경" sub="기관이 제출한 승인 신청 문서를 검토하고, 기관별 사업예산 총액과 변경 현황을 관리하세요." />
 
       <div className="tabs">
         <div className={`tb ${tab === "pending" ? "tb-on" : ""}`} onClick={() => setTab("pending")}>
           승인 대기 <span className="bg g-req" style={{ fontSize: 9.5, marginLeft: 5 }}>
             {db.docs.filter((d) => d.status === "pending").length}</span></div>
         <div className={`tb ${tab === "done" ? "tb-on" : ""}`} onClick={() => setTab("done")}>승인 완료</div>
-        <div className={`tb ${tab === "inner" ? "tb-on" : ""}`} onClick={() => setTab("inner")}>기관 내부 변경 현황</div>
+        <div className={`tb ${tab === "inner" ? "tb-on" : ""}`} onClick={() => setTab("inner")}>기관별 변경 현황</div>
+        <div className={`tb ${tab === "budget" ? "tb-on" : ""}`} onClick={() => setTab("budget")}>기관 예산 총액</div>
       </div>
 
-      {tab === "inner" ? (
+      {tab === "budget" ? (
         <div className="card">
-          <div className="chd"><h3>기관별 내부 예산변경 누적</h3>
-            <span style={{ fontSize: 11, color: "var(--ink3)" }}>1천만원 초과 시 승인 대상</span></div>
+          <div className="chd"><h3>기관별 사업예산 총액</h3>
+            <span style={{ fontSize: 11, color: "var(--ink3)" }}>기관 화면에 표시되며 변경 한도({CHANGE_LIMIT * 100}%) 계산 기준이 됩니다</span></div>
           <table>
-            <thead><tr><th>기관</th><th>변경 건수</th><th style={{ textAlign: "right" }}>누적금액</th><th>비고</th></tr></thead>
+            <thead><tr><th>기관</th><th style={{ width: 90 }}>차년도</th><th style={{ width: 220 }}>3개년 사업예산 총액 (원)</th><th style={{ width: 220 }}>당해년도 사업예산 총액 (원)</th><th style={{ width: 90 }} /></tr></thead>
             <tbody>
-              {innerRows.map((r) => (
-                <tr key={r.oid}>
-                  <td><b style={{ fontWeight: 500 }}>{orgOf(r.oid).name}</b></td>
-                  <td className="mono">{r.n}건</td>
-                  <td className="mono" style={{ textAlign: "right", color: r.cum > APPROVAL_THRESHOLD ? "var(--redT)" : "var(--ink)" }}>
-                    {won(r.cum)}원</td>
-                  <td>{r.cum > APPROVAL_THRESHOLD
-                    ? <span className="bg g-red">한도 초과 · 승인 필요</span>
+              {db.orgList.map((o) => {
+                const v = bud[o.id] || { total: String(o.budgetTotal || ""), year: String(o.budgetYear || "") };
+                const dirty = !!bud[o.id];
+                return (
+                  <tr key={o.id}>
+                    <td><b style={{ fontWeight: 500 }}>{o.name}</b></td>
+                    <td className="mono">{o.year}차년도</td>
+                    <td><input className="mono" value={v.total} placeholder="0" onChange={(e) => setBud({ ...bud, [o.id]: { ...v, total: e.target.value.replace(/[^0-9]/g, "") } })} /></td>
+                    <td><input className="mono" value={v.year} placeholder="0" onChange={(e) => setBud({ ...bud, [o.id]: { ...v, year: e.target.value.replace(/[^0-9]/g, "") } })} /></td>
+                    <td style={{ textAlign: "right" }}><button className={dirty ? "b1 bs" : "b2 bs"} disabled={!dirty} onClick={() => saveBudget(o)}>저장</button></td>
+                  </tr>
+                );
+              })}
+              {!db.orgList.length && <tr><td colSpan={5} style={{ textAlign: "center", padding: 32, color: "var(--ink3)" }}>등록된 기관이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      ) : tab === "inner" ? (
+        <div className="card">
+          <div className="chd"><h3>기관별 예산변경 누적 현황</h3>
+            <span style={{ fontSize: 11, color: "var(--ink3)" }}>내부 1천만원 초과 시 승인 대상 · 내부+문서 합산 {CHANGE_LIMIT * 100}% 한도</span></div>
+          <table>
+            <thead><tr><th>기관</th><th style={{ textAlign: "right" }}>당해년도 예산</th><th>내부 건수</th><th style={{ textAlign: "right" }}>내부 누적</th>
+              <th style={{ textAlign: "right" }}>승인 문서 누적</th><th style={{ textAlign: "right" }}>합산</th><th style={{ textAlign: "right" }}>비율</th><th>비고</th></tr></thead>
+            <tbody>
+              {status.map(({ o, n, inn, ex, sum, limit, pct }) => (
+                <tr key={o.id}>
+                  <td><b style={{ fontWeight: 500 }}>{o.name}</b></td>
+                  <td className="mono" style={{ textAlign: "right", color: o.budgetYear ? "var(--ink)" : "var(--ink3)" }}>{o.budgetYear ? `${won(o.budgetYear)}원` : "미등록"}</td>
+                  <td className="mono">{n}건</td>
+                  <td className="mono" style={{ textAlign: "right", color: inn > APPROVAL_THRESHOLD ? "var(--redT)" : "var(--ink)" }}>{won(inn)}원</td>
+                  <td className="mono" style={{ textAlign: "right" }}>{won(ex)}원</td>
+                  <td className="mono" style={{ textAlign: "right", fontWeight: 600 }}>{won(sum)}원</td>
+                  <td className="mono" style={{ textAlign: "right", color: pct !== null && sum > limit ? "var(--redT)" : "var(--ink)" }}>{pct === null ? "—" : `${pct.toFixed(1)}%`}</td>
+                  <td>{pct !== null && sum > limit ? <span className="bg g-red">{CHANGE_LIMIT * 100}% 초과</span>
+                    : inn > APPROVAL_THRESHOLD ? <span className="bg g-req">내부 1천만원 초과</span>
                     : <span className="bg g-not">한도 내</span>}</td>
                 </tr>
               ))}
-              {!innerRows.length && <tr><td colSpan={4} style={{ textAlign: "center", padding: 32, color: "var(--ink3)" }}>
-                내부 예산변경을 입력한 기관이 없습니다.</td></tr>}
+              {!status.length && <tr><td colSpan={8} style={{ textAlign: "center", padding: 32, color: "var(--ink3)" }}>등록된 기관이 없습니다.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1507,6 +1615,7 @@ function AdminBudget({ db, reload, say, log, who }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <b style={{ fontSize: 14 }}>{orgOf(d.orgId).name}</b>
                     <span className="bg g-sub">{d.kind === "budget" ? "예산변경" : "사업변경"}</span>
+                    {d.kind === "budget" && <span className="mono" style={{ fontSize: 11.5, color: "var(--ink2s)" }}>{won(d.amount)}원</span>}
                     {d.status === "approved" && <span className="bg g-app">승인 완료</span>}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink2s)", marginTop: 4 }}>{d.reason}</div>
