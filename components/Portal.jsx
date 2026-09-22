@@ -96,6 +96,12 @@ ${rows}<div class="f"><div class="l">희망 컨설턴트</div><div class="v">${e
   if (!w) return false;
   w.document.write(html); w.document.close(); return true;
 };
+// 금액 입력: 화면에는 1,000,000 으로, onChange 에는 숫자만("1000000") 전달
+const MoneyInput = ({ value, onChange, style, className, placeholder = "0" }) => (
+  <input className={`mono ${className || ""}`} style={style} inputMode="numeric" placeholder={placeholder}
+    value={value ? Number(value).toLocaleString("ko-KR") : ""}
+    onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, "").replace(/^0+(?=\d)/, ""))} />
+);
 const MAX_RANK = 3;   // 기관이 고르는 희망 순위 개수
 // settings.consult_types 의 한 회차만 부분 수정 (관리자 전용). 저장 후 reload() 필요.
 const patchConsultType = (key, patch) => {
@@ -1640,11 +1646,11 @@ function OrgBudget({ db, reload, say, log, me }) {
                     <div style={{ flex: 1 }}><label className="lbl">변경 전 산출근거</label>
                       <input value={x.beforeBasis} onChange={(e) => upItem(i, { beforeBasis: e.target.value })} placeholder="50,000원 × 20회" /></div>
                     <div style={{ width: 140 }}><label className="lbl">변경 전 금액</label>
-                      <input className={errs[`before${i}`] ? "err" : ""} value={x.beforeAmt} onChange={(e) => upItem(i, { beforeAmt: e.target.value.replace(/[^0-9]/g, "") })} placeholder="1000000" /></div>
+                      <MoneyInput className={errs[`before${i}`] ? "err" : ""} value={x.beforeAmt} onChange={(v) => upItem(i, { beforeAmt: v })} placeholder="1,000,000" /></div>
                     <div style={{ flex: 1 }}><label className="lbl">변경 후 산출근거</label>
                       <input value={x.afterBasis} onChange={(e) => upItem(i, { afterBasis: e.target.value })} placeholder="50,000원 × 26회" /></div>
                     <div style={{ width: 140 }}><label className="lbl">변경 후 금액</label>
-                      <input className={errs[`after${i}`] ? "err" : ""} value={x.afterAmt} onChange={(e) => upItem(i, { afterAmt: e.target.value.replace(/[^0-9]/g, "") })} placeholder="1300000" /></div>
+                      <MoneyInput className={errs[`after${i}`] ? "err" : ""} value={x.afterAmt} onChange={(v) => upItem(i, { afterAmt: v })} placeholder="1,300,000" /></div>
                   </div>
                   <div><label className="lbl">변경 사유</label>
                     <input className={errs[`reason${i}`] ? "err" : ""} value={x.reason} onChange={(e) => upItem(i, { reason: e.target.value })} placeholder="교육 회차 확대에 따른 강사료 증액" /></div>
@@ -1726,7 +1732,7 @@ function DocUpload({ onUpload }) {
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             <option value="budget">예산변경</option><option value="project">사업변경</option></select></div>
         {kind === "budget" && <div style={{ width: 170 }}><label className="lbl">변경 금액 (원, 절댓값)</label>
-          <input className={err === "amount" ? "err" : ""} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))} placeholder="3200000" /></div>}
+          <MoneyInput className={err === "amount" ? "err" : ""} value={amount} onChange={setAmount} placeholder="3,200,000" /></div>}
         <div style={{ flex: 1 }}><label className="lbl">변경 사유 (요약)</label>
           <input className={err === "reason" ? "err" : ""} value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder="목 간 전용 발생 (사업비 → 인건비 3,200,000원)" />
@@ -1802,8 +1808,8 @@ function AdminBudget({ db, reload, say, log, who }) {
                   <tr key={o.id}>
                     <td><b style={{ fontWeight: 500 }}>{o.name}</b></td>
                     <td className="mono">{o.year}차년도</td>
-                    <td><input className="mono" value={v.total} placeholder="0" onChange={(e) => setBud({ ...bud, [o.id]: { ...v, total: e.target.value.replace(/[^0-9]/g, "") } })} /></td>
-                    <td><input className="mono" value={v.year} placeholder="0" onChange={(e) => setBud({ ...bud, [o.id]: { ...v, year: e.target.value.replace(/[^0-9]/g, "") } })} /></td>
+                    <td><MoneyInput value={v.total} onChange={(n) => setBud({ ...bud, [o.id]: { ...v, total: n } })} /></td>
+                    <td><MoneyInput value={v.year} onChange={(n) => setBud({ ...bud, [o.id]: { ...v, year: n } })} /></td>
                     <td style={{ textAlign: "right" }}><button className={dirty ? "b1 bs" : "b2 bs"} disabled={!dirty} onClick={() => saveBudget(o)}>저장</button></td>
                   </tr>
                 );
