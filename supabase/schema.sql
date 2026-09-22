@@ -335,3 +335,24 @@ alter table orgs add column if not exists budget_total bigint not null default 0
 alter table orgs add column if not exists budget_year bigint not null default 0;
 alter table budgets add column if not exists item_to text not null default '';
 alter table docs add column if not exists amount bigint not null default 0;
+
+-- ───────── 사전 정보 회차별 분리 · 선택컨설팅 신청서 (2026-09-22 추가) ─────────
+-- 사전 정보를 컨설팅 회차별로 분리 (기존 행은 하반기 h2 로)
+alter table pre drop constraint pre_pkey;
+alter table pre add column if not exists type text not null default 'h2';
+alter table pre add primary key (org_id, type);
+
+-- 선택컨설팅 신청서
+create table if not exists consult_apps (
+  org_id int references orgs on delete cascade,
+  type text not null,
+  data jsonb not null default '{}',
+  expert_pref text not null default '',
+  at timestamptz not null default now(),
+  primary key (org_id, type)
+);
+alter table consult_apps enable row level security;
+create policy adm on consult_apps for all to authenticated using (is_admin()) with check (is_admin());
+create policy org_rw on consult_apps for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+create policy exp_sel on consult_apps for select to authenticated using (is_expert() and exists (
+  select 1 from confirms c where c.org_id = consult_apps.org_id and c.type = consult_apps.type and c.expert_id = auth.uid()));

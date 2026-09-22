@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { sb } from "@/lib/supabase/client";
 import { loadDb, run, uploadFiles, download } from "@/lib/db";
 import { PROGRAM, TEAM, CUR_YEAR, MAIL_VARS, MAIL_SUBJECT, MAIL_BODY, fillMail, REPORTS, FIX_DAYS, CAP, MAX_MB, APPROVAL_THRESHOLD, BUDGET_LEVELS,
-  CONSULT_TYPES, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb, currentSettings } from "@/lib/config";
+  CONSULT_TYPES, OPT_FIELDS, EXPERT_REPORTS, ST, CAT, NOTICES, fmt, iso, TODAY, won, mb, currentSettings } from "@/lib/config";
 
 /* ══════════════════════════════════════════════════════════
    이음 · NGO PARTNERS PORTAL — 관리자 / 기관 / 전문가 3종 화면
@@ -57,6 +57,21 @@ const isOpen = (T) => !!openAtOf(T) && new Date(openAtOf(T)) <= new Date();
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
 const openAtLabel = (T) => { const v = openAtOf(T); if (!v) return ""; const d = new Date(v);
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일(${WD[d.getDay()]}) ${String(d.getHours()).padStart(2, "0")}시${d.getMinutes() ? ` ${d.getMinutes()}분` : ""}`; };
+const isApply = (T) => T?.mode === "apply";
+const AppView = ({ app }) => (
+  <div>
+    {OPT_FIELDS.map((f) => (
+      <div key={f.key} style={{ marginBottom: 6 }}>
+        <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>{f.label}</div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{app.data[f.key] || "—"}</div>
+      </div>
+    ))}
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 10.5, color: "var(--ink3)" }}>희망 전문가</div>
+      <div style={{ fontSize: 12.5 }}>{app.expertPref || <span style={{ color: "var(--ink3)" }}>없음 · 사무국 배정</span>}</div>
+    </div>
+  </div>
+);
 const MAX_RANK = 3;   // 기관이 고르는 희망 순위 개수
 // settings.consult_types 의 한 회차만 부분 수정 (관리자 전용). 저장 후 reload() 필요.
 const patchConsultType = (key, patch) => {
@@ -758,6 +773,26 @@ function AdminConsult({ db, reload, say, log }) {
     reload();
   };
 
+  // 신청서 방식: 사무국이 전문가·일시를 직접 배정
+  const apps = db.consultApps.filter((a) => a.type === type);
+  const [assign, setAssign] = useState({});   // {orgId: {expertId, date, time}}
+  const assignOf = (oid) => { const cf = confirms.find((c) => c.orgId === oid); return assign[oid] || { expertId: cf?.expertId || "", date: cf?.date || "", time: cf?.time || "" }; };
+  const doAssign = async (oid) => {
+    const a = assignOf(oid);
+    if (!a.date) { say("일자를 입력해 주세요."); return; }
+    const x = { date: a.date, time: a.time || "" };
+    if (a.expertId && confirms.some((c) => c.expertId === a.expertId && sameSlot(c, x) && c.orgId !== oid)) { say("같은 일시에 해당 전문가의 타 기관 컨설팅이 확정되어 있습니다."); return; }
+    const eName = db.experts.find((e) => e.id === a.expertId)?.name;
+    try {
+      await run(sb.from("confirms").upsert({ org_id: oid, type, date: iso(a.date), time: x.time, expert_id: a.expertId || null }));
+      await run(sb.from("alerts").insert({ org_id: oid, text: `${T.label} 일정이 ${slotLong(x)}로 확정되었습니다.${eName ? ` (담당 전문가 ${eName})` : ""}` }));
+      await log("선택컨설팅 배정", `${orgOf(oid).name} · ${slotShort(x)}${eName ? ` · ${eName}` : ""}`);
+    } catch (e) { say(`처리 실패: ${e.message}`); return; }
+    reload(); setAssign({ ...assign, [oid]: undefined });
+    say(`배정했습니다 — ${orgOf(oid).name} · ${slotShort(x)}`);
+  };
+  const [openApp, setOpenApp] = useState({});
+
   const byRank = (a, b) => (a.rank || 99) - (b.rank || 99);
   // 그 시간대에 이미 다른 기관에 배정된 전문가인지
   const expertBusy = (expertId, x, orgId) => !!expertId && confirms.some((c) => c.expertId === expertId && sameSlot(c, x) && c.orgId !== orgId);
@@ -822,6 +857,64 @@ function AdminConsult({ db, reload, say, log }) {
         ))}
       </div>
 
+      {isApply(T) ? (
+      <div className="card">
+        <div className="chd"><h3>{T.label} 신청서</h3>
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>{apps.length}개 기관 신청 · {confirms.length}건 배정</span></div>
+        <table>
+          <thead><tr><th style={{ width: 150 }}>기관</th><th>신청 내용</th><th style={{ width: 130 }}>희망 전문가</th>
+            <th style={{ width: 360 }}>전문가 · 일시 배정</th><th style={{ width: 250 }}>Zoom 링크 / 안내 메일</th></tr></thead>
+          <tbody>
+            {apps.map((ap) => {
+              const oid = ap.orgId, o = orgOf(oid), cf = confirms.find((c) => c.orgId === oid), a = assignOf(oid);
+              const failed = db.mailFails.some((f) => f.orgId === oid);
+              const setA = (patch) => setAssign({ ...assign, [oid]: { ...a, ...patch } });
+              return (
+                <tr key={oid}>
+                  <td style={{ verticalAlign: "top" }}><b style={{ fontWeight: 500, color: cf ? "var(--greenT)" : "var(--ink)" }}>{o.name}</b>
+                    <div className="mono" style={{ fontSize: 10.5, color: "var(--ink3)" }}>제출 {ap.at}</div>
+                    {cf ? <span className="bg g-app" style={{ marginTop: 4 }}>배정 완료</span> : <span className="bg g-rev" style={{ marginTop: 4 }}>배정 대기</span>}</td>
+                  <td style={{ verticalAlign: "top", fontSize: 12 }}>
+                    <div style={{ fontWeight: 500 }}>{ap.data[OPT_FIELDS[0].key] || "—"}</div>
+                    {openApp[oid] ? <div style={{ marginTop: 6 }}><AppView app={ap} /><span className="lnk" onClick={() => setOpenApp({ ...openApp, [oid]: false })}>접기</span></div>
+                      : <span className="lnk" onClick={() => setOpenApp({ ...openApp, [oid]: true })}>전체 보기 →</span>}
+                  </td>
+                  <td style={{ verticalAlign: "top", fontSize: 11.5 }}>{ap.expertPref || <span style={{ color: "var(--ink3)" }}>없음 · 사무국 배정</span>}</td>
+                  <td style={{ verticalAlign: "top" }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <select style={{ width: 120, padding: "5px 7px" }} value={a.expertId} onChange={(e) => setA({ expertId: e.target.value })}>
+                        <option value="">전문가 선택</option>
+                        {db.experts.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                      </select>
+                      <input type="date" style={{ width: 140, padding: "5px 7px" }} value={a.date ? iso(a.date) : ""} onChange={(e) => setA({ date: fmt(e.target.value) })} />
+                      <input type="time" style={{ width: 100, padding: "5px 7px" }} value={a.time} onChange={(e) => setA({ time: e.target.value })} />
+                      <button className="b1 bs" onClick={() => doAssign(oid)}>{cf ? "변경" : "배정·확정"}</button>
+                    </div>
+                    {cf && <div style={{ fontSize: 10.5, marginTop: 4, color: "var(--ink3)" }}>확정 {slotShort(cf)}{expertName(db, cf) ? ` · ${expertName(db, cf)}` : " · 전문가 미배정"}</div>}
+                  </td>
+                  <td style={{ verticalAlign: "top" }}>
+                    {!cf ? <span style={{ fontSize: 11, color: "var(--ink3)" }}>배정 후 입력 가능</span> : (
+                      <>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <input style={{ padding: "5px 8px", fontSize: 11 }} placeholder="https://zoom.us/j/..."
+                            value={zoom[oid] ?? cf.zoom} onChange={(e) => setZoom({ ...zoom, [oid]: e.target.value })} />
+                          <button className="b1 bs" onClick={() => saveZoom(oid)}>저장·발송</button>
+                        </div>
+                        <div style={{ fontSize: 10.5, marginTop: 4, color: failed ? "var(--redT)" : "var(--ink3)" }}>
+                          {failed ? <>발송 실패 · <span className="lnk" onClick={() => retry(oid)}>재시도</span></>
+                            : cf.mailedAt ? `${cf.mailedAt} → ${db.managers[oid].email}` : `수신처 ${db.managers[oid].email}`}
+                        </div>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {!apps.length && <tr><td colSpan={5} style={{ textAlign: "center", padding: 34, color: "var(--ink3)" }}>아직 신청서를 제출한 기관이 없습니다.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      ) : (<>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="chd"><h3>1단계 · 전문가 가능 일시 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{answered}/{db.experts.length}명 응답</span></h3>
           {isOpen(T) ? <span className="bg g-app" style={{ fontSize: 10.5 }}>기관 접수 중 · {openAtLabel(T)}부터</span>
@@ -1008,11 +1101,11 @@ function AdminConsult({ db, reload, say, log }) {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        <div className="chd"><h3>컨설팅 사전 정보</h3>
-          <span style={{ fontSize: 11, color: "var(--ink3)" }}>기관이 컨설팅 전 작성 · {Object.keys(db.pre).length}개 기관 제출</span></div>
-        {Object.keys(db.pre).length === 0
+        <div className="chd"><h3>{T.label} 사전 정보</h3>
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>기관이 이 회차 전에 작성 · {Object.values(db.pre).filter((p) => p[type]).length}개 기관 제출</span></div>
+        {Object.values(db.pre).filter((p) => p[type]).length === 0
           ? <div style={{ padding: 30, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>제출된 사전 정보가 없습니다.</div>
-          : Object.entries(db.pre).map(([oid, p]) => (
+          : Object.entries(db.pre).filter(([, p]) => p[type]).map(([oid, pp]) => [oid, pp[type]]).map(([oid, p]) => (
             <div key={oid} style={{ padding: "14px 16px", borderBottom: "1px solid var(--line2)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
                 <b style={{ fontWeight: 700 }}>{orgOf(Number(oid)).name}</b>
@@ -1028,6 +1121,7 @@ function AdminConsult({ db, reload, say, log }) {
             </div>
           ))}
       </div>
+      </>)}
 
       {preview && (
         <div className="mask" onClick={() => !sending && setPreview(null)}>
@@ -1068,14 +1162,38 @@ function OrgConsult({ db, reload, say, log, me }) {
   const taken = (x) => db.confirms.some((c) => c.type === type && c.orgId !== me.id && c.expertId === me.expertId && sameSlot(c, x))
     || db.avail.some((a) => a.type === type && a.rank === 1 && sameExpertOrgs.includes(a.orgId) && sameSlot(a, x));
   const cf = db.confirms.find((c) => c.orgId === me.id && c.type === type);
-  const pre = db.pre[me.id] || { rate: "", progress: "", country: "", ask: "" };
+  const savedPre = db.pre[me.id]?.[type];                      // 회차별로 따로 저장
+  const pre = savedPre || { rate: "", progress: "", country: "", ask: "" };
   const [form, setForm] = useState(pre);
   const [errs, setErrs] = useState({});
-  const [editPre, setEditPre] = useState(!db.pre[me.id]);   // 저장된 내용이 있으면 열람 모드로 시작
+  const [editPre, setEditPre] = useState(!savedPre);   // 저장된 내용이 있으면 열람 모드로 시작
+  // 신청서 방식(선택컨설팅)
+  const app = db.consultApps.find((a) => a.orgId === me.id && a.type === type);
+  const [appForm, setAppForm] = useState(() => ({ ...(app?.data || {}), expertPref: app?.expertPref || "" }));
+  const [editApp, setEditApp] = useState(!app);
+  const [appErrs, setAppErrs] = useState({});
 
   useEffect(() => {
     setPicks(db.avail.filter((a) => a.orgId === me.id && a.type === type).sort(byRank).map(slotKey));
+    const sp = db.pre[me.id]?.[type];
+    setForm(sp || { rate: "", progress: "", country: "", ask: "" }); setEditPre(!sp); setErrs({});
+    const ap = db.consultApps.find((a) => a.orgId === me.id && a.type === type);
+    setAppForm({ ...(ap?.data || {}), expertPref: ap?.expertPref || "" }); setEditApp(!ap); setAppErrs({});
   }, [type, me.id]);
+
+  const saveApp = async () => {
+    const e = {};
+    OPT_FIELDS.forEach((f) => { if (f.required && !String(appForm[f.key] || "").trim()) e[f.key] = 1; });
+    setAppErrs(e);
+    if (Object.keys(e).length) { say("입력하지 않은 필수 항목이 있습니다."); return; }
+    const data = Object.fromEntries(OPT_FIELDS.map((f) => [f.key, String(appForm[f.key] || "").trim()]));
+    try {
+      await run(sb.from("consult_apps").upsert({ org_id: me.id, type, data, expert_pref: (appForm.expertPref || "").trim(), at: new Date().toISOString() }));
+      await log(app ? "선택컨설팅 신청서 수정" : "선택컨설팅 신청서 제출", `${T.label} · ${data[OPT_FIELDS[0].key]}`);
+    } catch (e2) { say(`저장 실패: ${e2.message}`); return; }
+    reload(); setEditApp(false);
+    say(app ? "신청서를 수정했습니다." : "신청서를 제출했습니다. 사무국이 전문가와 일시를 배정하면 안내됩니다.");
+  };
 
   const toggle = (d) => setPicks((p) => { if (p.includes(d)) return p.filter((x) => x !== d); if (p.length >= MAX_RANK) { say(`희망 순위는 ${MAX_RANK}개까지 고를 수 있습니다.`); return p; } return [...p, d]; });
 
@@ -1100,7 +1218,7 @@ function OrgConsult({ db, reload, say, log, me }) {
     setErrs(e);
     if (Object.keys(e).length) { say("입력하지 않은 필수 항목이 있습니다."); return; }
     try {
-      await run(sb.from("pre").upsert({ org_id: me.id, rate: String(form.rate), progress: form.progress, country: form.country, ask: form.ask || "", at: new Date().toISOString() }));
+      await run(sb.from("pre").upsert({ org_id: me.id, type, rate: String(form.rate), progress: form.progress, country: form.country, ask: form.ask || "", at: new Date().toISOString() }));
     } catch (e) { say(`저장 실패: ${e.message}`); return; }
     reload(); setEditPre(false);
     say("컨설팅 사전 정보를 저장했습니다. 전문가와 사무국이 열람합니다.");
@@ -1108,7 +1226,7 @@ function OrgConsult({ db, reload, say, log, me }) {
 
   return (
     <div>
-      <PageHead title="컨설팅 일정" sub="담당 전문가의 가능 일시 중에서 희망 순위를 골라 주세요. 사무국이 매칭을 승인하면 최종 일정이 확정됩니다." />
+      <PageHead title="컨설팅 일정" sub={isApply(T) ? "신청서를 제출하면 사무국이 전문가와 일시를 배정해 안내합니다." : "담당 전문가의 가능 일시 중에서 희망 순위를 골라 주세요. 사무국이 매칭을 승인하면 최종 일정이 확정됩니다."} />
 
       <div className="tabs">
         {CONSULT_TYPES.map((t) => (
@@ -1117,6 +1235,34 @@ function OrgConsult({ db, reload, say, log, me }) {
           </div>
         ))}
       </div>
+
+      {isApply(T) && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="chd"><h3>{T.label} 신청서</h3>
+            <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "var(--ink3)" }}>
+              {app ? `제출 ${app.at}` : "작성 후 제출해 주세요"}
+              {app && !editApp && <button className="b2 bs" onClick={() => setEditApp(true)}>수정</button>}
+            </span></div>
+          {!editApp && app ? <div style={{ padding: 18 }}><AppView app={app} /></div> : (
+            <div style={{ padding: 18 }}>
+              {OPT_FIELDS.map((f) => (
+                <div key={f.key} style={{ marginBottom: 14 }}>
+                  <label className="lbl">{f.label}{f.required && <span style={{ color: "var(--redT)" }}> *</span>}</label>
+                  {f.kind === "textarea"
+                    ? <textarea rows={3} className={appErrs[f.key] ? "err" : ""} value={appForm[f.key] || ""} onChange={(e) => setAppForm({ ...appForm, [f.key]: e.target.value })} />
+                    : <input type={f.kind === "date" ? "date" : "text"} className={appErrs[f.key] ? "err" : ""} value={appForm[f.key] || ""} onChange={(e) => setAppForm({ ...appForm, [f.key]: e.target.value })} />}
+                </div>
+              ))}
+              <div style={{ marginBottom: 16 }}>
+                <label className="lbl">희망 전문가 (선택)</label>
+                <input value={appForm.expertPref || ""} onChange={(e) => setAppForm({ ...appForm, expertPref: e.target.value })} placeholder="원하는 전문가가 있으면 이름·소속을 적어 주세요. 비워두면 사무국이 배정합니다." />
+              </div>
+              <button className="b1" onClick={saveApp}>{app ? "수정 저장" : "신청서 제출"}</button>
+              {app && <button className="b2" style={{ marginLeft: 8 }} onClick={() => { setAppForm({ ...app.data, expertPref: app.expertPref }); setEditApp(false); }}>취소</button>}
+            </div>
+          )}
+        </div>
+      )}
 
       {cf ? (
         <div className="card" style={{ padding: 22, marginBottom: 16, background: "var(--green)", borderColor: "#C6E3D2" }}>
@@ -1130,6 +1276,8 @@ function OrgConsult({ db, reload, say, log, me }) {
               : "Zoom 링크는 확정 후 담당자 이메일로 발송됩니다."}
           </div>
         </div>
+      ) : isApply(T) ? (
+        app && <div className="card note" style={{ background: "var(--blue)", color: "var(--blueT)", marginBottom: 16 }}>신청서가 접수되었습니다. 사무국이 전문가와 일시를 배정하면 이곳에 확정 일정이 표시됩니다.</div>
       ) : (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
@@ -1170,11 +1318,11 @@ function OrgConsult({ db, reload, say, log, me }) {
         </>
       )}
 
-      <div className="card">
-        <div className="chd"><h3>컨설팅 사전 정보</h3>
+      {!isApply(T) && <div className="card">
+        <div className="chd"><h3>{T.label} 사전 정보</h3>
           <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "var(--ink3)" }}>
-            {db.pre[me.id] ? `최근 저장 ${db.pre[me.id].at}` : "컨설팅 전 미리 작성해 주세요"}
-            {!editPre && <button className="b2 bs" onClick={() => { setForm(db.pre[me.id]); setEditPre(true); }}>수정</button>}
+            {savedPre ? `최근 저장 ${savedPre.at}` : "컨설팅 전 미리 작성해 주세요 · 회차마다 따로 작성합니다"}
+            {!editPre && <button className="b2 bs" onClick={() => { setForm(savedPre); setEditPre(true); }}>수정</button>}
           </span></div>
         {!editPre ? (
           <div style={{ padding: 18 }}>
@@ -1213,10 +1361,10 @@ function OrgConsult({ db, reload, say, log, me }) {
               placeholder="컨설팅에서 다루고 싶은 고민점을 적어 주세요." />
           </div>
           <button className="b1" onClick={savePre}>사전 정보 저장</button>
-          {db.pre[me.id] && <button className="b2" style={{ marginLeft: 8 }} onClick={() => setEditPre(false)}>취소</button>}
+          {savedPre && <button className="b2" style={{ marginLeft: 8 }} onClick={() => setEditPre(false)}>취소</button>}
         </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -1763,7 +1911,12 @@ function ExpertConsult({ db, reload, say, log, me }) {
         ))}
       </div>
 
-      {T && (
+      {T && isApply(T) && (
+        <div className="card note" style={{ background: "var(--blue)", color: "var(--blueT)", marginBottom: 16 }}>
+          {T.label}은 기관이 신청서를 제출하면 사무국이 전문가와 일시를 직접 배정합니다. 배정되면 아래 확정 일정과 신청서 내용이 표시됩니다.
+        </div>
+      )}
+      {T && !isApply(T) && (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="chd"><h3>{T.label} 가능 일시 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{periodOf(T)}</span></h3>
@@ -1815,8 +1968,9 @@ function ExpertConsult({ db, reload, say, log, me }) {
                   <td className="mono"><b>{c.date.slice(5)}</b>{c.time && <> {timeRange(c)}</>}</td>
                   <td><span className="bg g-rev" style={{ fontSize: 10.5 }}>{CT?.label || c.type}</span></td>
                   <td><b style={{ fontWeight: 500 }}>{orgOf(c.orgId).name}</b>
-                    {db.pre[c.orgId] && <div style={{ fontSize: 10.5, color: "var(--brand2)" }}>
-                      사전 정보 제출됨 · 집행률 {db.pre[c.orgId].rate}%</div>}</td>
+                    {db.pre[c.orgId]?.[c.type] && <div style={{ fontSize: 10.5, color: "var(--brand2)" }}>
+                      사전 정보 제출됨 · 집행률 {db.pre[c.orgId][c.type].rate}%</div>}
+                    {isApply(CT) && db.consultApps.find((a) => a.orgId === c.orgId && a.type === c.type) && <div style={{ fontSize: 10.5, color: "var(--brand2)" }}>신청서 제출됨 · 아래 참고</div>}</td>
                   <td style={{ fontSize: 11.5 }}><span className="bg g-app">{me.name}</span></td>
                   <td style={{ fontSize: 11.5, color: "var(--ink2s)" }}>{m.name} {m.title}</td>
                   <td style={{ fontSize: 11.5 }}>
@@ -1833,14 +1987,26 @@ function ExpertConsult({ db, reload, say, log, me }) {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        <div className="chd"><h3>컨설팅 사전 정보</h3>
-          <span style={{ fontSize: 11, color: "var(--ink3)" }}>내가 담당하는 기관이 컨설팅 전 작성한 내용</span></div>
-        {Object.entries(db.pre).filter(([oid]) => myOrgIds.has(Number(oid))).length === 0
-          ? <div style={{ padding: 30, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>담당 기관의 사전 정보가 아직 없습니다.</div>
-          : Object.entries(db.pre).filter(([oid]) => myOrgIds.has(Number(oid))).map(([oid, p]) => (
-            <div key={oid} style={{ padding: "14px 16px", borderBottom: "1px solid var(--line2)" }}>
+        <div className="chd"><h3>컨설팅 사전 정보 · 신청서</h3>
+          <span style={{ fontSize: 11, color: "var(--ink3)" }}>내가 담당하는 기관이 해당 회차 전에 작성한 내용</span></div>
+        {rows.filter((c) => isApply(CONSULT_TYPES.find((t) => t.key === c.type))).map((c) => {
+          const ap = db.consultApps.find((a) => a.orgId === c.orgId && a.type === c.type);
+          return ap && (
+            <div key={`app-${c.orgId}-${c.type}`} style={{ padding: "14px 16px", borderBottom: "1px solid var(--line2)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-                <b>{orgOf(Number(oid)).name}</b>
+                <b>{orgOf(c.orgId).name}</b><span className="bg g-sub">{CONSULT_TYPES.find((t) => t.key === c.type)?.label} 신청서</span>
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--ink3)" }}>{ap.at}</span>
+              </div>
+              <AppView app={ap} />
+            </div>
+          );
+        })}
+        {rows.filter((c) => db.pre[c.orgId]?.[c.type]).length === 0 && !rows.some((c) => db.consultApps.find((a) => a.orgId === c.orgId && a.type === c.type))
+          ? <div style={{ padding: 30, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>담당 기관의 사전 정보가 아직 없습니다.</div>
+          : rows.filter((c) => db.pre[c.orgId]?.[c.type]).map((c) => [c, db.pre[c.orgId][c.type]]).map(([c, p]) => (
+            <div key={`pre-${c.orgId}-${c.type}`} style={{ padding: "14px 16px", borderBottom: "1px solid var(--line2)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+                <b>{orgOf(c.orgId).name}</b><span className="bg g-sub">{CONSULT_TYPES.find((t) => t.key === c.type)?.label}</span>
                 <span className="bg g-rev">예산 집행률 {p.rate}%</span>
               </div>
               {[["세부활동별 진행현황", p.progress], ["현지 여건 및 주요 이슈", p.country], ["전문가 자문 요청사항", p.ask]].map(([l, v]) => (
@@ -2398,7 +2564,7 @@ function Settings({ db, reload, say, log }) {
   const init = () => {
     const c = currentSettings();
     return { ...c,
-      consult_types: c.consult_types.map((t) => ({ key: t.key, label: t.label, required: !!t.required, slots: slotsOf(t), open_at: t.open_at || "", dur: t.dur || 120 })),
+      consult_types: c.consult_types.map((t) => ({ key: t.key, label: t.label, required: !!t.required, mode: t.mode || "slots", slots: slotsOf(t), open_at: t.open_at || "", dur: t.dur || 120 })),
       notices: c.notices.map((n) => ({ t: n.t, d: n.d, body: n.body.join("\n\n"), ctaLabel: n.cta?.[0] || "", ctaPage: n.cta?.[1] || "" })) };
   };
   const [f, setF] = useState(init);
@@ -2425,7 +2591,7 @@ function Settings({ db, reload, say, log }) {
       program: f.program.trim(), team: f.team.trim(), program_year: Number(f.program_year),
       reports: f.reports.map((r) => ({ key: r.key, label: r.label.trim(), start: r.start || "", due: r.due })),
       fix_days: Number(f.fix_days) || 7, cap: Number(f.cap) || 2,
-      consult_types: f.consult_types.map((t) => ({ key: t.key, label: t.label.trim(), required: !!t.required,
+      consult_types: f.consult_types.map((t) => ({ key: t.key, label: t.label.trim(), required: !!t.required, mode: t.mode || "slots",
         slots: t.slots.map((x) => ({ date: x.date, time: x.time || "" })).filter((x, i, arr) => arr.findIndex((y) => sameSlot(x, y)) === i)
           .sort((a, b) => slotKey(a).localeCompare(slotKey(b))) })),
       expert_reports: f.expert_reports.map((r) => ({ key: r.key, label: r.label.trim(), due: r.due })),
@@ -2492,6 +2658,9 @@ function Settings({ db, reload, say, log }) {
                 <IN style={{ flex: 1 }} value={t.label} placeholder="회차 이름 (예: 하반기 필수컨설팅)" onChange={(e) => upRow("consult_types", i, { label: e.target.value })} />
                 <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
                   <input type="checkbox" style={{ width: "auto" }} checked={!!t.required} onChange={(e) => upRow("consult_types", i, { required: e.target.checked })} />필수</label>
+                <select style={{ width: 150, padding: "6px 8px", fontSize: 12 }} value={t.mode || "slots"} onChange={(e) => upRow("consult_types", i, { mode: e.target.value })}>
+                  <option value="slots">일정 선택 방식</option><option value="apply">신청서 방식</option>
+                </select>
                 <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>1건
                   <IN type="number" style={{ width: 70 }} value={t.dur || 120} onChange={(e) => upRow("consult_types", i, { dur: Number(e.target.value) || 120 })} />분</label>
                 <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>기관 공개

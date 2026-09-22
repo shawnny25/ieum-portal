@@ -55,6 +55,9 @@ try {
   assert(ne && /manager only/.test(ne.message), "기관명 변경이 막혀야 함: " + ne?.message); ok("기관명은 못 바꿈 (트리거)");
   assert((await org.from("orgs").update({ budget_year: 999 }).eq("id", mine.id)).error); ok("예산 총액은 기관이 못 바꿈");
   assert(!(await org.from("budgets").insert({ org_id: mine.id, round: 1, date: "2027.03.02", doc_no: "t", level: "세세목", item: "강사비", item_to: "다과비", before_amt: 100, after_amt: 50, reason: "e2e" })).error); ok("내부 예산변경(항목 전환) 등록");
+  assert(!(await org.from("consult_apps").upsert({ org_id: mine.id, type: "opt", data: { topic: "e2e" } })).error); ok("선택컨설팅 신청서 제출");
+  assert((await org.from("consult_apps").upsert({ org_id: other.id, type: "opt", data: {} })).error); ok("다른 기관 신청서 못 씀");
+  assert(!(await org.from("pre").upsert({ org_id: mine.id, type: "h1", rate: "10" })).error && !(await org.from("pre").upsert({ org_id: mine.id, type: "h2", rate: "20" })).error); ok("사전 정보 회차별 저장");
   assert(!(await org.from("docs").insert({ org_id: mine.id, kind: "budget", name: "e2e.pdf", path: `org-${mine.id}/e2e.pdf`, reason: "e2e", amount: 3200000 })).error); ok("승인 문서(변경 금액) 등록");
 
   // 5. 스토리지 격리
