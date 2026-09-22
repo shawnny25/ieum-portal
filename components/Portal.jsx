@@ -89,6 +89,7 @@ const printApp = (app, T) => {
 h1{font-size:20px;margin:0 0 4px}.sub{color:#667391;font-size:12px;margin-bottom:22px}h2{font-size:13.5px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #E6EAF3}
 .f{margin-bottom:12px}.l{font-size:11px;color:#98A3BC}.v{white-space:pre-wrap}.foot{margin-top:28px;font-size:11px;color:#98A3BC}
 @media print{body{margin:0}button{display:none}}</style></head><body>
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><img src="${location.origin}/logo-kcoc.jpg" style="height:36px"><span style="width:1px;height:26px;background:#E6EAF3"></span><img src="${location.origin}/logo-chest.png" style="height:36px"></div>
 <h1>${esc(T?.label || "컨설팅")} 신청서</h1><div class="sub">${esc(o?.name)} · 제출 ${esc(app.at)} · ${esc(PROGRAM)}</div>
 ${rows}<div class="f"><div class="l">희망 컨설턴트</div><div class="v">${esc(app.expertPref || "없음 · 사무국 추천 배정")}</div></div>
 <div class="foot">${esc(TEAM)} · 출력 ${esc(TODAY)}</div><script>window.onload=()=>{window.print()}</script></body></html>`;
@@ -283,6 +284,9 @@ export default function Portal({ profile }) {
       <div className="side">
         <div className="brand"><div className="logo">n</div><span style={{ fontSize: 17, fontWeight: 700 }}>이음</span></div>
         <div className="brandsub">NGO PARTNERS PORTAL</div>
+        <div className="logos" title="KCOC · 사랑의열매 사회복지공동모금회">
+          <img src="/logo-kcoc.jpg" alt="KCOC" /><span className="sep" /><img src="/logo-chest.png" alt="사랑의열매 사회복지공동모금회" />
+        </div>
         <div className="navcap">{role === "expert" ? "전문가 메뉴" : "사업 관리"}</div>
         {NAV.map(([k, label, ic]) => (
           <div key={k} className={`nvi ${cur === k ? "nvi-on" : ""}`} onClick={() => go(k)}>

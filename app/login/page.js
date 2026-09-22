@@ -57,6 +57,11 @@ export default function Login() {
   return (
     <div className="ip" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <form onSubmit={mode === "login" ? login : setPassword} className="card" style={{ width: 360, padding: 28 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+          <img src="/logo-kcoc.jpg" alt="KCOC" style={{ height: 34 }} />
+          <span style={{ width: 1, height: 26, background: "var(--line)" }} />
+          <img src="/logo-chest.png" alt="사랑의열매 사회복지공동모금회" style={{ height: 34 }} />
+        </div>
         <div className="brand" style={{ padding: 0, marginBottom: 4 }}><div className="logo" style={{ color: "#fff" }}>n</div><span style={{ fontSize: 17, fontWeight: 700 }}>이음</span></div>
         <div style={{ fontSize: 9, letterSpacing: 1.3, color: "var(--ink3)", marginBottom: 22 }}>NGO PARTNERS PORTAL</div>
 

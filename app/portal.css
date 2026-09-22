@@ -25,6 +25,9 @@
 .ip .nvi:hover{ background:var(--nav2); color:#fff; }
 .ip .nvi-on{ background:var(--nav2); color:#fff; font-weight:500; border-left-color:#5B82E8; }
 .ip .nvi svg{ width:14px; height:14px; opacity:.8; flex-shrink:0; }
+.ip .logos{ display:flex; align-items:center; gap:8px; margin:12px 18px 0; padding:8px 10px; background:#fff; border-radius:8px; }
+.ip .logos img{ height:26px; width:auto; display:block; }
+.ip .logos .sep{ width:1px; height:22px; background:#E6EAF3; }
 .ip .sidefoot{ margin-top:auto; padding:15px 18px; border-top:1px solid #2A3556; font-size:10.5px; color:var(--navTx); line-height:1.75; }
 .ip .top{ height:46px; display:flex; align-items:center; justify-content:space-between; padding:0 18px;
   border-bottom:1px solid var(--line); background:#fff; }
