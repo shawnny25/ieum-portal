@@ -78,6 +78,24 @@ const AppView = ({ app }) => (
     </div>
   </div>
 );
+// 신청서 인쇄: 깨끗한 새 창에 내용만 찍고 인쇄 대화상자
+const printApp = (app, T) => {
+  const o = orgOf(app.orgId);
+  const esc = (t) => String(t ?? "").replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]));
+  const rows = OPT_FIELDS.map((f) => (f.section ? `<h2>${esc(f.section)}</h2>` : "") +
+    `<div class="f"><div class="l">${esc(f.label)}</div><div class="v">${esc(appValue(f, { ...app.data, _orgId: app.orgId }) || "—")}</div></div>`).join("");
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(T?.label || "컨설팅")} 신청서 · ${esc(o?.name)}</title>
+<style>body{font-family:'Noto Sans KR',-apple-system,sans-serif;color:#1A2440;max-width:760px;margin:32px auto;padding:0 24px;font-size:13px;line-height:1.7}
+h1{font-size:20px;margin:0 0 4px}.sub{color:#667391;font-size:12px;margin-bottom:22px}h2{font-size:13.5px;margin:22px 0 8px;padding-bottom:6px;border-bottom:1px solid #E6EAF3}
+.f{margin-bottom:12px}.l{font-size:11px;color:#98A3BC}.v{white-space:pre-wrap}.foot{margin-top:28px;font-size:11px;color:#98A3BC}
+@media print{body{margin:0}button{display:none}}</style></head><body>
+<h1>${esc(T?.label || "컨설팅")} 신청서</h1><div class="sub">${esc(o?.name)} · 제출 ${esc(app.at)} · ${esc(PROGRAM)}</div>
+${rows}<div class="f"><div class="l">희망 컨설턴트</div><div class="v">${esc(app.expertPref || "없음 · 사무국 추천 배정")}</div></div>
+<div class="foot">${esc(TEAM)} · 출력 ${esc(TODAY)}</div><script>window.onload=()=>{window.print()}</script></body></html>`;
+  const w = window.open("", "_blank", "width=860,height=900");
+  if (!w) return false;
+  w.document.write(html); w.document.close(); return true;
+};
 const MAX_RANK = 3;   // 기관이 고르는 희망 순위 개수
 // settings.consult_types 의 한 회차만 부분 수정 (관리자 전용). 저장 후 reload() 필요.
 const patchConsultType = (key, patch) => {
@@ -797,7 +815,7 @@ function AdminConsult({ db, reload, say, log }) {
     reload(); setAssign({ ...assign, [oid]: undefined });
     say(`배정했습니다 — ${orgOf(oid).name} · ${slotShort(x)}`);
   };
-  const [openApp, setOpenApp] = useState({});
+  const [openApp, setOpenApp] = useState(null);   // 신청서 보기 모달 (app)
 
   const byRank = (a, b) => (a.rank || 99) - (b.rank || 99);
   // 그 시간대에 이미 다른 기관에 배정된 전문가인지
@@ -882,8 +900,11 @@ function AdminConsult({ db, reload, say, log }) {
                     {cf ? <span className="bg g-app" style={{ marginTop: 4 }}>배정 완료</span> : <span className="bg g-rev" style={{ marginTop: 4 }}>배정 대기</span>}</td>
                   <td style={{ verticalAlign: "top", fontSize: 12 }}>
                     <div style={{ fontWeight: 500 }}>{appValue(OPT_FIELDS.find((f) => f.key === "field"), ap.data) || "—"}</div>
-                    {openApp[oid] ? <div style={{ marginTop: 6 }}><AppView app={ap} /><span className="lnk" onClick={() => setOpenApp({ ...openApp, [oid]: false })}>접기</span></div>
-                      : <span className="lnk" onClick={() => setOpenApp({ ...openApp, [oid]: true })}>전체 보기 →</span>}
+                    <div style={{ fontSize: 11.5, color: "var(--ink2s)", marginTop: 3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{ap.data.reason}</div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="b2 bs" onClick={() => setOpenApp(ap)}>신청서 보기</button>
+                      <button className="b2 bs" onClick={() => { if (!printApp(ap, T)) say("팝업이 차단되었습니다. 이 사이트의 팝업을 허용해 주세요."); }}>인쇄</button>
+                    </div>
                   </td>
                   <td style={{ verticalAlign: "top", fontSize: 11.5 }}>{ap.expertPref || <span style={{ color: "var(--ink3)" }}>없음 · 사무국 배정</span>}</td>
                   <td style={{ verticalAlign: "top" }}>
@@ -1128,6 +1149,24 @@ function AdminConsult({ db, reload, say, log }) {
           ))}
       </div>
       </>)}
+
+      {openApp && (
+        <div className="mask" onClick={() => setOpenApp(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760, maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "18px 22px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>{orgOf(openApp.orgId).name} · {T.label} 신청서</div>
+                <div className="mono" style={{ fontSize: 11, color: "var(--ink3)", marginTop: 2 }}>제출 {openApp.at}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="b1 bs" onClick={() => { if (!printApp(openApp, T)) say("팝업이 차단되었습니다. 이 사이트의 팝업을 허용해 주세요."); }}>인쇄</button>
+                <button className="b2 bs" onClick={() => setOpenApp(null)}>닫기</button>
+              </div>
+            </div>
+            <div style={{ padding: "8px 22px 22px", overflow: "auto" }}><AppView app={openApp} /></div>
+          </div>
+        </div>
+      )}
 
       {preview && (
         <div className="mask" onClick={() => !sending && setPreview(null)}>
