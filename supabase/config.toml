@@ -2,6 +2,10 @@
 # 적용: SMTP_PASS 환경변수를 넣고  npx supabase config push --project-ref kcgiddadxjbjoimfzfwr
 project_id = "ieum-portal"
 
+[auth]
+site_url = "https://ieum-portal.vercel.app/login"
+additional_redirect_urls = ["https://ieum-portal.vercel.app/**", "http://localhost:3000/**"]
+
 [auth.email.smtp]
 enabled = true
 host = "smtp.gmail.com"
