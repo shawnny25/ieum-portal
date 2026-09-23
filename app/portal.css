@@ -55,7 +55,7 @@
 .ip .g-app{ background:var(--green); color:var(--greenT); }
 .ip .g-sub{ background:var(--violet); color:var(--violetT); }
 .ip .g-red{ background:var(--red); color:var(--redT); }
-.ip button{ font-family:inherit; cursor:pointer; border-radius:6px; font-size:12.5px; transition:.12s; }
+.ip button{ font-family:inherit; cursor:pointer; border-radius:6px; font-size:12.5px; transition:.12s; white-space:nowrap; }
 .ip .b1{ background:var(--brand); color:#fff; border:none; padding:8px 15px; font-weight:500; }
 .ip .b1:hover{ background:#243F86; }
 .ip .b1:disabled{ background:#AAB4CC; cursor:not-allowed; }
@@ -63,6 +63,7 @@
 .ip .b2:hover{ background:var(--bg); }
 .ip .b3{ background:#B4531F; color:#fff; border:none; padding:8px 15px; font-weight:500; }
 .ip .b3:hover{ background:#96420F; }
+.ip .b3:disabled{ background:#D8B9A6; cursor:not-allowed; }
 .ip .bs{ padding:4px 10px; font-size:11.5px; }
 .ip .chip{ background:#fff; border:1px solid var(--line); color:var(--ink2s); padding:5px 13px; border-radius:20px; font-size:11.5px; }
 .ip .chip-on{ background:var(--nav); border-color:var(--nav); color:#fff; font-weight:500; }

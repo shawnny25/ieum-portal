@@ -2571,17 +2571,15 @@ function Users({ db, reload, say, log, profile }) {
     setOrg({ name: "", picked: CUR_YEAR }); reload(); say("기관을 추가했습니다.");
   };
 
-  // 제출·예산·컨설팅 등 기관 데이터는 DB 에서 연쇄 삭제, 기관 계정은 기관 연결만 끊긴다(로그인 차단). 스토리지 파일은 남는다.
-  const removeOrg = async (o) => {
-    const accts = db.profiles.filter((p) => p.org_id === o.id).length;
-    const typed = prompt(`"${o.name}" 기관을 삭제합니다.\n제출 자료·예산변경·컨설팅 일정 등 이 기관의 모든 데이터가 영구 삭제되고 되돌릴 수 없습니다.`
-      + (accts ? `\n연결된 기관 계정 ${accts}개는 로그인이 차단됩니다.` : "") + `\n\n계속하려면 기관명을 정확히 입력해 주세요.`);
-    if (typed === null) return;
-    if (typed.trim() !== o.name) { say("기관명이 일치하지 않아 삭제하지 않았습니다."); return; }
-    try { await run(sb.from("orgs").delete().eq("id", o.id)); }
-    catch (e) { say(`삭제 실패: ${e.message}`); return; }
-    await log("기관 삭제", `${o.name} · ${o.picked}년 선발`);
-    reload(); say("기관을 삭제했습니다.");
+  // 기관 삭제: 관리자 본인 비밀번호를 서버(/api/admin/orgs)에서 확인한 뒤 삭제. 스토리지 파일은 남는다.
+  const [delOrg, setDelOrg] = useState(null);   // {org, pw}
+  const removeOrg = async () => {
+    setBusy(true);
+    const r = await fetch("/api/admin/orgs", { method: "DELETE", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: delOrg.org.id, password: delOrg.pw }) }).then((x) => x.json());
+    setBusy(false);
+    if (r.error) { say(`삭제 실패: ${r.error}`); return; }
+    setDelOrg(null); reload(); say("기관을 삭제했습니다.");
   };
 
   return (
@@ -2630,7 +2628,7 @@ function Users({ db, reload, say, log, profile }) {
             {db.orgs.map((o) => (
               <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--line2)", fontSize: 12 }}>
                 <span>{o.name} <span style={{ color: "var(--ink3)" }}>{o.picked}년 선발</span></span>
-                <button className="b2 bs" onClick={() => removeOrg(o)}>삭제</button>
+                <button className="b2 bs" onClick={() => setDelOrg({ org: o, pw: "" })}>삭제</button>
               </div>
             ))}
           </div>
@@ -2645,7 +2643,7 @@ function Users({ db, reload, say, log, profile }) {
             {db.profiles.map((p) => (
               <tr key={p.id}>
                 <td><span className={`bg ${p.role === "admin" ? "g-app" : p.role === "expert" ? "g-sub" : "g-rev"}`}>{ROLE[p.role]}</span></td>
-                <td>{p.role === "org" ? (orgOf(p.org_id)?.name ?? "—")
+                <td>{p.role === "org" ? (orgOf(p.org_id)?.name ?? <span style={{ color: "var(--ink3)" }}>삭제된 기관</span>)
                   : ed?.id === p.id ? (
                     <span style={{ display: "flex", gap: 6 }}>
                       <input style={{ padding: "5px 8px" }} placeholder="이름" value={ed.name} onChange={(e) => setEd({ ...ed, name: e.target.value })} />
@@ -2664,6 +2662,26 @@ function Users({ db, reload, say, log, profile }) {
           </tbody>
         </table>
       </div>
+
+      {delOrg && (
+        <div className="mask" onClick={() => setDelOrg(null)}>
+          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (delOrg.pw) removeOrg(); }}
+            style={{ padding: "18px 20px" }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>"{delOrg.org.name}" 기관 삭제</div>
+            <div className="note" style={{ background: "var(--red)", color: "var(--redT)", margin: "12px 0" }}>
+              제출 자료 · 예산변경 · 컨설팅 일정 등 이 기관의 모든 데이터가 영구 삭제되며 되돌릴 수 없습니다.
+              {(() => { const n = db.profiles.filter((p) => p.org_id === delOrg.org.id).length; return n ? ` 연결된 기관 계정 ${n}개도 함께 삭제됩니다.` : ""; })()}
+            </div>
+            <label className="lbl">확인을 위해 본인(관리자) 비밀번호를 입력해 주세요</label>
+            <input type="password" autoFocus autoComplete="current-password" value={delOrg.pw}
+              onChange={(e) => setDelOrg({ ...delOrg, pw: e.target.value })} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button type="button" className="b2" onClick={() => setDelOrg(null)}>취소</button>
+              <button type="submit" className="b3" disabled={busy || !delOrg.pw}>삭제</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
