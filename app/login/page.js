@@ -58,7 +58,7 @@ export default function Login() {
     <div className="ip" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <form onSubmit={mode === "login" ? login : setPassword} className="card" style={{ width: 360, padding: 28 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
-          <img src="/logo-kcoc.jpg" alt="KCOC" style={{ height: 34 }} />
+          <img src="/logo-kcoc.png" alt="KCOC" style={{ height: 34 }} />
           <span style={{ width: 1, height: 26, background: "var(--line)" }} />
           <img src="/logo-chest.png" alt="사랑의열매 사회복지공동모금회" style={{ height: 34 }} />
         </div>
