@@ -55,8 +55,8 @@ export default function Login() {
   };
 
   return (
-    <div className="ip" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <form onSubmit={mode === "login" ? login : setPassword} className="card" style={{ width: 360, padding: 28 }}>
+    <div className="ip" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <form onSubmit={mode === "login" ? login : setPassword} className="card" style={{ width: "100%", maxWidth: 360, padding: 28 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 18 }}>
           <img src="/logo-kcoc.png" alt="KCOC" style={{ height: 24 }} />
           <span style={{ width: 1, height: 18, background: "var(--line)" }} />

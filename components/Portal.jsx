@@ -139,7 +139,7 @@ function Icon({ n }) {
 
 function PageHead({ title, sub, right }) {
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
+    <div className="cols" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
       <div><h1>{title}</h1><div className="sub">{sub}</div></div>
       {right}
     </div>
@@ -280,7 +280,7 @@ export default function Portal({ profile }) {
   const ctx = { db, reload, say, go, log, me, who, role, orgOf, detail, setDetail, profile, kind: curKind, setKind, R: reportOf(curKind) };
 
   return (
-    <div className="ip" style={{ display: "flex", minHeight: "100vh" }}>
+    <div className="ip shell" style={{ display: "flex", minHeight: "100vh" }}>
       <div className="side">
         <div className="brand"><div className="logo">n</div><span style={{ fontSize: 17, fontWeight: 700 }}>이음</span></div>
         <div className="brandsub">NGO PARTNERS PORTAL</div>
@@ -288,11 +288,11 @@ export default function Portal({ profile }) {
           <img src="/logo-kcoc.png" alt="KCOC" /><span className="sep" /><img src="/logo-chest.png" alt="사랑의열매 사회복지공동모금회" />
         </div>
         <div className="navcap">{role === "expert" ? "전문가 메뉴" : "사업 관리"}</div>
-        {NAV.map(([k, label, ic]) => (
+        <div className="navs">{NAV.map(([k, label, ic]) => (
           <div key={k} className={`nvi ${cur === k ? "nvi-on" : ""}`} onClick={() => go(k)}>
             <Icon n={ic} />{label}
           </div>
-        ))}
+        ))}</div>
         <div className="sidefoot">
           <div style={{ color: "#fff", fontWeight: 500, marginBottom: 3 }}>{PROGRAM}</div>
           {role === "org"
@@ -303,9 +303,9 @@ export default function Portal({ profile }) {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="top">
-          <div className="crumb">{PROGRAM} &nbsp;/&nbsp; <b>{title}</b></div>
+          <div className="crumb"><span className="crumbp">{PROGRAM} &nbsp;/&nbsp; </span><b>{title}</b></div>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <span style={{ fontSize: 12, color: "var(--ink2s)" }}>{role === "org" ? me.name : `${profile.name} ${profile.title}`}</span>
+            <span className="who" style={{ fontSize: 12, color: "var(--ink2s)" }}>{role === "org" ? me.name : `${profile.name} ${profile.title}`}</span>
             <button className="b2 bs" onClick={logout}>로그아웃</button>
             <div className="avat">{me ? me.ini : "관"}</div>
           </div>
@@ -387,7 +387,7 @@ function AdminDash({ db, go, setDetail, kind, setKind, R }) {
       <PageHead title="통합 대시보드" sub="기관별 진행 상황과 오늘 해야 할 업무를 살펴보세요." />
       <ReportTabs kind={kind} setKind={setKind} />
 
-      <div className="card" style={{ display: "flex", padding: "14px 0", marginBottom: 14 }}>
+      <div className="card stats" style={{ display: "flex", padding: "14px 0", marginBottom: 14 }}>
         {[["미제출", c.none, "#98A3BC"], ["검토 중", c.reviewing, "#3E63C4"], ["수정 요청", c.revision, "#D9A03C"],
           ["최종 완료", c.approved, "#25A366"], ["승인 대기", pending, "#8A6BD9"]].map(([l, v, col]) => (
           <div key={l} style={{ flex: 1, display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "0 18px" }}>
@@ -398,7 +398,7 @@ function AdminDash({ db, go, setDetail, kind, setKind, R }) {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+      <div className="cols" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="chd"><h3>기관별 제출 현황 <span style={{ fontWeight: 400, fontSize: 11.5, color: "var(--ink3)" }}>{R.label}</span></h3>
@@ -712,7 +712,7 @@ function Annual({ db, reload, say, log, me, editable }) {
           </div>
         )}
 
-        <div style={{ display: "flex", borderTop: "1px solid var(--line2)", paddingTop: 14 }}>
+        <div className="qrow" style={{ display: "flex", borderTop: "1px solid var(--line2)", paddingTop: 14 }}>
           {Q.map(([qn, qr, months], qi) => (
             <div key={qn} style={{ flex: 1, minWidth: 0, padding: "0 11px", borderLeft: qi ? "1px solid var(--line2)" : "none" }}>
               <div style={{ marginBottom: 12 }}>
@@ -1546,7 +1546,7 @@ function OrgBudget({ db, reload, say, log, me }) {
     <div>
       <PageHead title="예산변경 / 사업변경" sub="기관 내부 변경은 직접 입력하고, 승인이 필요한 변경은 문서로 제출합니다." />
 
-      <div className="card" style={{ display: "flex", padding: "14px 0", marginBottom: 14 }}>
+      <div className="card stats" style={{ display: "flex", padding: "14px 0", marginBottom: 14 }}>
         <Stat l="3개년 사업예산 총액" v={o.budgetTotal ? `${won(o.budgetTotal)}원` : "—"} sub="사무국 등록" />
         <Stat l={`${o.year}차년도 사업예산 총액`} v={o.budgetYear ? `${won(o.budgetYear)}원` : "—"} sub="사무국 등록" />
         <Stat l="누적 변경액 (내부 + 승인 문서)" v={`${won(cum)}원`} sub={`내부 ${won(cumIn)} · 문서 ${won(cumEx)}`} warn={over20 && cum > limit} />
@@ -2144,7 +2144,7 @@ function OrgDash({ db, reload, say, go, me, setKind }) {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
+      <div className="cols" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
           <h1>{me.name}</h1>
           <div className="sub">{PROGRAM} · {me.year}차년도 수행기관 · 이용 기간 {me.picked}—{me.picked + 2}</div>
@@ -2205,7 +2205,7 @@ function OrgDash({ db, reload, say, go, me, setKind }) {
         })}
       </div>
 
-      <div style={{ display: "flex", gap: 16 }}>
+      <div className="cols" style={{ display: "flex", gap: 16 }}>
         <div className="card" style={{ flex: 1, padding: 16 }}>
           <h3 style={{ margin: "0 0 11px", fontSize: 13.5 }}>컨설팅</h3>
           {cf ? (
@@ -2453,7 +2453,7 @@ function OrgsPage({ db, setDetail, go, kind, R }) {
           <b style={{ fontSize: 13.5 }}>이용 종료 기관</b>
           <span style={{ fontSize: 11, color: "var(--ink3)" }}>3년 경과 · 로그인 차단</span>
         </div>
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {ENDED.map((o) => (
             <div key={o.id} className="card" style={{ width: "calc(33.33% - 8px)", padding: 15, background: "#FAFBFD" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -2575,7 +2575,7 @@ function Users({ db, reload, say, log, profile }) {
     <div>
       <PageHead title="계정 관리" sub="기관·전문가·관리자 계정을 발급하고, 참여 기관을 등록합니다." />
 
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", marginBottom: 16 }}>
+      <div className="cols" style={{ display: "flex", gap: 16, alignItems: "flex-start", marginBottom: 16 }}>
         <div className="card" style={{ flex: 2, padding: 18 }}>
           <h3 style={{ margin: "0 0 12px", fontSize: 13.5 }}>계정 발급</h3>
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -2708,7 +2708,7 @@ function Settings({ db, reload, say, log }) {
 
       <div className="card" style={{ padding: 18, marginBottom: 14 }}>
         <h3 style={{ margin: "0 0 12px", fontSize: 13.5 }}>기본 정보</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div className="cols" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div><label className="lbl">사업명</label><IN value={f.program} onChange={(e) => up("program", e.target.value)} /></div>
           <div><label className="lbl">운영 부서명 (문구·메일 서명)</label><IN value={f.team} onChange={(e) => up("team", e.target.value)} /></div>
           <div><label className="lbl">사업연도 (이 해에 선발된 기관 = 1차년도)</label><IN type="number" value={f.program_year} onChange={(e) => up("program_year", e.target.value)} /></div>
