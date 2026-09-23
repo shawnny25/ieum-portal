@@ -1033,7 +1033,7 @@ function AdminConsult({ db, reload, say, log }) {
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line2)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line2)" }}>
             <span style={{ fontSize: 11.5, fontWeight: 700 }}>기관 공개 시작 일시</span>
             <IN type="datetime-local" style={{ width: 210 }} value={openAtVal} onChange={(e) => setOpenAt(e.target.value)} />
             <button className="b1 bs" onClick={saveOpenAt}>저장</button>
