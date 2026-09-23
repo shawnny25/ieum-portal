@@ -362,3 +362,9 @@ create policy exp_sel on consult_apps for select to authenticated using (is_expe
 -- 담당 전문가로 컨설팅 일정에 연결된 계정을 지우면 confirms.expert_id 가 null 로 바뀌며 guard 트리거가 도는데,
 -- 인증 서버의 search_path(auth) 에서 my_role() 을 못 찾아 "Database error deleting user" 가 났다.
 alter function public.guard_cols() set search_path = public;
+
+-- ───────── 기관이 담당 전문가 프로필을 못 읽던 문제 (2026-09-23) ─────────
+-- profiles 는 본인 행만 읽을 수 있어 기관 화면에서 담당 전문가를 찾지 못했고, 전문가 가능 일시가 하나도 표시되지 않았다.
+-- 자기 기관에 배정된 전문가 한 명만 읽게 허용 (my_role·my_expert 는 security definer 라 재귀 없음).
+create policy org_expert on profiles for select to authenticated
+  using (my_role() = 'org' and id = my_expert());
