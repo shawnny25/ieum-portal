@@ -2571,6 +2571,19 @@ function Users({ db, reload, say, log, profile }) {
     setOrg({ name: "", picked: CUR_YEAR }); reload(); say("기관을 추가했습니다.");
   };
 
+  // 제출·예산·컨설팅 등 기관 데이터는 DB 에서 연쇄 삭제, 기관 계정은 기관 연결만 끊긴다(로그인 차단). 스토리지 파일은 남는다.
+  const removeOrg = async (o) => {
+    const accts = db.profiles.filter((p) => p.org_id === o.id).length;
+    const typed = prompt(`"${o.name}" 기관을 삭제합니다.\n제출 자료·예산변경·컨설팅 일정 등 이 기관의 모든 데이터가 영구 삭제되고 되돌릴 수 없습니다.`
+      + (accts ? `\n연결된 기관 계정 ${accts}개는 로그인이 차단됩니다.` : "") + `\n\n계속하려면 기관명을 정확히 입력해 주세요.`);
+    if (typed === null) return;
+    if (typed.trim() !== o.name) { say("기관명이 일치하지 않아 삭제하지 않았습니다."); return; }
+    try { await run(sb.from("orgs").delete().eq("id", o.id)); }
+    catch (e) { say(`삭제 실패: ${e.message}`); return; }
+    await log("기관 삭제", `${o.name} · ${o.picked}년 선발`);
+    reload(); say("기관을 삭제했습니다.");
+  };
+
   return (
     <div>
       <PageHead title="계정 관리" sub="기관·전문가·관리자 계정을 발급하고, 참여 기관을 등록합니다." />
@@ -2612,6 +2625,14 @@ function Users({ db, reload, say, log, profile }) {
               {[0, 1, 2].map((i) => <option key={i} value={CUR_YEAR - i}>{CUR_YEAR - i}년 선발 ({i + 1}차년도)</option>)}
             </select>
             <button className="b1" onClick={addOrg}>추가</button>
+          </div>
+          <div style={{ marginTop: 14, borderTop: "1px solid var(--line2)" }}>
+            {db.orgs.map((o) => (
+              <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--line2)", fontSize: 12 }}>
+                <span>{o.name} <span style={{ color: "var(--ink3)" }}>{o.picked}년 선발</span></span>
+                <button className="b2 bs" onClick={() => removeOrg(o)}>삭제</button>
+              </div>
+            ))}
           </div>
         </div>
       </div>

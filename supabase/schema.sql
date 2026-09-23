@@ -199,7 +199,8 @@ create policy exp_sel on reports  for select to authenticated using (is_expert()
 create policy exp_ins on reports  for insert to authenticated with check (is_expert() and expert_id = auth.uid());
 
 -- 열 단위 제한: 기관은 feedbacks.reply 만, 전문가는 confirms.zoom 만 수정 가능
-create function guard_cols() returns trigger language plpgsql as $$
+-- search_path 고정: 계정 삭제(auth 스키마에서 실행) 연쇄로 이 트리거가 돌 때 my_role() 을 못 찾아 삭제가 실패했다
+create function guard_cols() returns trigger language plpgsql set search_path = public as $$
 begin
   if tg_table_name = 'feedbacks' and my_role() = 'org' then
     if to_jsonb(new) - 'reply' <> to_jsonb(old) - 'reply' then raise exception 'reply only'; end if;
@@ -356,3 +357,8 @@ create policy adm on consult_apps for all to authenticated using (is_admin()) wi
 create policy org_rw on consult_apps for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
 create policy exp_sel on consult_apps for select to authenticated using (is_expert() and exists (
   select 1 from confirms c where c.org_id = consult_apps.org_id and c.type = consult_apps.type and c.expert_id = auth.uid()));
+
+-- ───────── 계정 삭제 실패 수정 (2026-09-23) ─────────
+-- 담당 전문가로 컨설팅 일정에 연결된 계정을 지우면 confirms.expert_id 가 null 로 바뀌며 guard 트리거가 도는데,
+-- 인증 서버의 search_path(auth) 에서 my_role() 을 못 찾아 "Database error deleting user" 가 났다.
+alter function public.guard_cols() set search_path = public;
