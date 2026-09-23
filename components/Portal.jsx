@@ -1142,7 +1142,7 @@ function AdminConsult({ db, reload, say, log }) {
           <span style={{ fontSize: 11, color: "var(--ink3)" }}>기관이 이 회차 전에 작성 · {Object.values(db.pre).filter((p) => p[type]).length}개 기관 제출</span></div>
         {Object.values(db.pre).filter((p) => p[type]).length === 0
           ? <div style={{ padding: 30, textAlign: "center", color: "var(--ink3)", fontSize: 12 }}>제출된 사전 정보가 없습니다.</div>
-          : Object.entries(db.pre).filter(([, p]) => p[type]).map(([oid, pp]) => [oid, pp[type]]).map(([oid, p]) => (
+          : Object.entries(db.pre).filter(([oid, p]) => p[type] && orgOf(Number(oid))).map(([oid, pp]) => [oid, pp[type]]).map(([oid, p]) => (
             <div key={oid} style={{ padding: "14px 16px", borderBottom: "1px solid var(--line2)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
                 <b style={{ fontWeight: 700 }}>{orgOf(Number(oid)).name}</b>
@@ -2405,7 +2405,7 @@ function OrgsPage({ db, setDetail, go, kind, R }) {
     <div>
       <PageHead title="참여 기관"
         sub={`수행 차년도별 참여 기관과 이용 기간을 확인하세요. 선발 연도 기준 3년간 이용할 수 있습니다.`} />
-      <div style={{ display: "flex", gap: 7, marginBottom: 18 }}>
+      <div style={{ display: "flex", gap: 7, marginBottom: 18, flexWrap: "wrap" }}>
         <button className={`chip ${!yf ? "chip-on" : ""}`} onClick={() => setYf(0)}>전체 기관<span className="chip-c">{ORGS.length}</span></button>
         {[1, 2, 3].map((y) => (
           <button key={y} className={`chip ${yf === y ? "chip-on" : ""}`} onClick={() => setYf(y)}>
@@ -2423,7 +2423,7 @@ function OrgsPage({ db, setDetail, go, kind, R }) {
             </div>
             <span style={{ fontSize: 11, color: "var(--ink3)" }}>{YL[y]}</span>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+          <div className="cols" style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
             {ORGS.filter((o) => o.year === y).map((o) => {
               const s = subOf(db, o.id, kind);
               return (

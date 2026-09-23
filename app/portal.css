@@ -117,6 +117,10 @@
   .ip .stats > div{ flex:1 1 40% !important; padding:0 14px !important; }
   .ip .card{ overflow-x:auto; }
   .ip .chd{ flex-wrap:wrap; gap:6px; }
+  .ip .card table{ min-width:560px; }
+  .ip th, .ip button, .ip .chip, .ip .tb{ white-space:nowrap; }
+  .ip button{ flex-shrink:0; }
+  .ip .tabs{ overflow-x:auto; scrollbar-width:none; }
   .ip .qrow{ flex-direction:column; }
   .ip .qrow > div{ border-left:none !important; padding:12px 0 !important; border-top:1px solid var(--line2); }
   .ip .qrow > div:first-child{ border-top:none; padding-top:0 !important; }
