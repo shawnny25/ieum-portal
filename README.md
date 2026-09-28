@@ -23,11 +23,17 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 
 ### 백업
 
-매일 0시 `/api/cron` 이 DB 전체와 계정 목록을 JSON 으로 덤프해 스토리지 `backups` 버킷에 저장하고 60일 지난 것을 지운다.
-복원: Supabase → Storage → backups 에서 파일명 확인 후
-```bash
-node --env-file=.env.local scripts/restore.mjs ieum-2026-09-14.json
-```
+매일 한국 시간 오전 9시(Vercel 크론 `0 0 * * *` 은 UTC 기준) `/api/cron` 이 두 가지를 한다.
+
+1. DB 전체와 계정 목록을 JSON 으로 덤프해 Supabase 스토리지 `backups` 버킷에 저장, 60일 지난 것은 삭제.
+   복원: Supabase → Storage → backups 에서 파일명 확인 후
+   ```bash
+   node --env-file=.env.local scripts/restore.mjs ieum-2026-09-14.json
+   ```
+   비밀번호는 백업되지 않는다(Supabase 가 내보내지 않음). 계정 복원 후 비밀번호 재설정으로 안내.
+2. 제출 파일(R2 `ieum-files`)을 R2 `ieum-files-backup` 버킷으로 증분 복사. 백업 쪽은 지우지 않는다.
+   복원: Cloudflare 대시보드 → R2 → `ieum-files-backup` 에서 해당 파일을 받아 다시 올리거나, 같은 키로 `ieum-files` 에 복사.
+   같은 Cloudflare 계정 안의 사본이므로 계정 사고까지 대비하려면 주기적으로 외부에 내려받아 둘 것.
 
 ### 검증
 
