@@ -147,7 +147,8 @@ function PageHead({ title, sub, right }) {
 }
 
 // 파일 선택·검증만 담당. onDone(File[]) 을 호출하면 화면 쪽에서 uploadFiles() 로 올린다.
-function Uploader({ onDone, label = "제출하기" }) {
+// single: 한 건에 파일 하나만 저장하는 곳(승인 문서·전문가 보고서). 여러 개면 zip 으로 묶어 올리도록 안내
+function Uploader({ onDone, label = "제출하기", single = false }) {
   const [staged, setStaged] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -160,7 +161,8 @@ function Uploader({ onDone, label = "제출하기" }) {
     if (bad) { setErr(`허용되지 않는 파일 형식입니다 — ${bad.name} (zip · pdf · hwp · docx · xlsx · 이미지만 업로드할 수 있습니다)`); return; }
     const big = arr.find((f) => f.size > MAX_MB * 1048576);
     if (big) { setErr(`파일당 ${MAX_MB}MB를 초과했습니다 — ${big.name}`); return; }
-    setErr(""); setStaged((s) => [...s, ...arr]);
+    if (single && arr.length > 1) { setErr("파일은 하나만 올릴 수 있습니다. 여러 개면 zip 으로 묶어 주세요."); return; }
+    setErr(""); setStaged((s) => (single ? arr : [...s, ...arr]));
   };
   const go = async () => {
     setBusy(true);
@@ -169,7 +171,7 @@ function Uploader({ onDone, label = "제출하기" }) {
 
   return (
     <div>
-      <input ref={ref} type="file" multiple style={{ display: "none" }}
+      <input ref={ref} type="file" multiple={!single} style={{ display: "none" }}
         onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
       <div className="drop" onClick={() => ref.current?.click()}
         onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files); }}>
@@ -456,15 +458,15 @@ function AdminDash({ db, go, setDetail, kind, setKind, R }) {
             <div style={{ fontSize: 11, color: "var(--ink3)" }}>전체 {subs.length}건 중 {c.approved}건 완료</div>
           </div>
 
-          <div className="card" style={{ padding: 16, marginBottom: 14 }}>
+          {h2 && <div className="card" style={{ padding: 16, marginBottom: 14 }}>
             <h3 style={{ margin: "0 0 10px", fontSize: 13.5 }}>{h2.label}</h3>
             <div style={{ fontSize: 11.5, color: "var(--ink2s)", lineHeight: 1.9 }}>
-              기간 {h2.period}<br />
+              기간 {periodOf(h2)}<br />
               가능일자 신청 <b className="mono" style={{ color: "var(--ink)" }}>{applied}</b>/{db.orgList.length} 기관<br />
               일정 확정 <b className="mono" style={{ color: "var(--greenT)" }}>{fixed}</b>건
             </div>
             <button className="b1" style={{ width: "100%", marginTop: 11 }} onClick={() => go("consult")}>컨설팅 일정 관리 →</button>
-          </div>
+          </div>}
 
           <div className="card" style={{ padding: 16 }}>
             <h3 style={{ margin: "0 0 11px", fontSize: 13.5 }}>최근 활동</h3>
@@ -1742,7 +1744,7 @@ function DocUpload({ onUpload }) {
             placeholder="목 간 전용 발생 (사업비 → 인건비 3,200,000원)" />
           {err && <div className="errmsg">{err === "amount" ? "변경 금액을 입력해 주세요." : "변경 사유를 입력해 주세요."}</div>}</div>
       </div>
-      <Uploader label="승인 신청 제출"
+      <Uploader label="승인 신청 제출" single
         onDone={async (files) => {
           if (!reason.trim()) { setErr("reason"); throw new Error("reason"); }
           if (kind === "budget" && !Number(amount)) { setErr("amount"); throw new Error("amount"); }
@@ -1938,7 +1940,7 @@ function ExpertSubmit({ db, reload, say, log, me }) {
             {db.orgList.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </div>
-        <Uploader label="보고서 제출" onDone={submit} />
+        <Uploader label="보고서 제출" single onDone={submit} />
       </div>
 
       <div className="card">
@@ -2725,6 +2727,7 @@ function Settings({ db, reload, say, log }) {
       reports: f.reports.map((r) => ({ key: r.key, label: r.label.trim(), start: r.start || "", due: r.due })),
       fix_days: Number(f.fix_days) || 7, cap: Number(f.cap) || 2,
       consult_types: f.consult_types.map((t) => ({ key: t.key, label: t.label.trim(), required: !!t.required, mode: t.mode || "slots",
+        open_at: t.open_at || "", dur: Number(t.dur) || 120,   // 빠뜨리면 저장할 때마다 기관 공개 일시·소요 시간이 지워진다
         slots: t.slots.map((x) => ({ date: x.date, time: x.time || "" })).filter((x, i, arr) => arr.findIndex((y) => sameSlot(x, y)) === i)
           .sort((a, b) => slotKey(a).localeCompare(slotKey(b))) })),
       expert_reports: f.expert_reports.map((r) => ({ key: r.key, label: r.label.trim(), due: r.due })),
