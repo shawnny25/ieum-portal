@@ -162,10 +162,10 @@
 <h2>8.3 인프라 요금제 조합별 비용 비교</h2>
 <p>금액은 각 서비스의 공개 요금(기준일 현재) 기준이며, 원화는 <b>1달러 = 1,400원</b>으로 환산해 반올림했습니다. 해외 카드 결제 수수료 · 부가세 · 환율 변동은 별도입니다.</p>
 <table>
-  <tr><th style="width:20%">구분</th><th style="width:38%">구성</th><th style="width:14%">월</th><th style="width:14%">연</th><th>3년 합계</th></tr>
-  <tr><td>A. 현행 유지</td><td>전부 무료 플랜</td><td>$0</td><td>$0</td><td>$0</td></tr>
-  <tr><td>B. 호스팅만 유료</td><td>Vercel Pro + 나머지 무료</td><td>$20<br>(약 2.8만원)</td><td>$240<br>(약 34만원)</td><td>$720<br>(약 101만원)</td></tr>
-  <tr><td><b>C. 채택안</b></td><td><b>Vercel Pro + Supabase Pro</b></td><td><b>$45<br>(약 6.3만원)</b></td><td><b>$540<br>(약 76만원)</b></td><td><b>$1,620<br>(약 227만원)</b></td></tr>
+  <tr><th style="width:20%">구분</th><th style="width:44%">구성</th><th style="width:18%">월</th><th>연</th></tr>
+  <tr><td>A. 현행 유지</td><td>전부 무료 플랜</td><td>$0</td><td>$0</td></tr>
+  <tr><td>B. 호스팅만 유료</td><td>Vercel Pro + 나머지 무료</td><td>$20<br>(약 2.8만원)</td><td>$240<br>(약 34만원)</td></tr>
+  <tr><td><b>C. 채택안</b></td><td><b>Vercel Pro + Supabase Pro</b></td><td><b>$45<br>(약 6.3만원)</b></td><td><b>$540<br>(약 76만원)</b></td></tr>
 </table>
 <table>
   <tr><th style="width:20%">추가 가능 비용</th><th style="width:52%">발생 조건</th><th>예상 금액</th></tr>
@@ -202,19 +202,19 @@
 <h2>8.5 개발 · 유지보수 비용 (Claude Code)</h2>
 <p>포털은 AI 코딩 도구 <b>Claude Code</b>로 개발했으며, 기능 개선 · 오류 수정 · 문서 갱신 등 유지보수도 같은 방식으로 진행합니다. Claude Code 는 Anthropic 의 Claude 구독 <b>Max 5x</b> 요금제로 이용하며, 현재 규모의 개발 · 유지보수에 충분합니다. 담당자 1인 기준, 월 단위 구독 · 해지가 가능합니다.</p>
 <table>
-  <tr><th style="width:20%">요금제</th><th style="width:38%">용도</th><th style="width:14%">월</th><th style="width:14%">연</th><th>3년 합계</th></tr>
-  <tr><td><b>Max 5x</b></td><td>개발 · 유지보수 전반 (오류 수정, 기능 개선, 차년도 사업 규칙 반영, 설정 · 문서 변경)</td><td>$100<br>(약 14만원)</td><td>$1,200<br>(약 168만원)</td><td>$3,600<br>(약 504만원)</td></tr>
+  <tr><th style="width:20%">요금제</th><th style="width:44%">용도</th><th style="width:18%">월</th><th>연</th></tr>
+  <tr><td><b>Max 5x</b></td><td>개발 · 유지보수 전반 (오류 수정, 기능 개선, 차년도 사업 규칙 반영, 설정 · 문서 변경)</td><td>$100<br>(약 14만원)</td><td>$1,200<br>(약 168만원)</td></tr>
 </table>
 
 <h2>8.6 예산 편성 (비목 구분)</h2>
 <p>포털 운영에 직접 드는 인프라 비용은 <b>사업비</b>로, 개발 · 유지보수 도구 구독료는 <b>관리운영비</b>로 편성합니다.</p>
 <table>
-  <tr><th style="width:14%">비목</th><th style="width:30%">항목</th><th style="width:18%">월</th><th style="width:18%">연</th><th>3년 합계</th></tr>
-  <tr><td rowspan="3">사업비</td><td>Vercel Pro (웹 서비스 호스팅)</td><td>$20 (약 2.8만원)</td><td>$240 (약 34만원)</td><td>$720 (약 101만원)</td></tr>
-  <tr><td>Supabase Pro (데이터베이스 · 로그인)</td><td>$25 (약 3.5만원)</td><td>$300 (약 42만원)</td><td>$900 (약 126만원)</td></tr>
-  <tr><td><b>소계</b></td><td><b>$45 (약 6.3만원)</b></td><td><b>$540 (약 76만원)</b></td><td><b>$1,620 (약 227만원)</b></td></tr>
-  <tr><td>관리운영비</td><td>Claude Code Max 5x (개발 · 유지보수)</td><td>$100 (약 14만원)</td><td>$1,200 (약 168만원)</td><td>$3,600 (약 504만원)</td></tr>
-  <tr><td colspan="2"><b>합계</b></td><td><b>$145 (약 20.3만원)</b></td><td><b>$1,740 (약 244만원)</b></td><td><b>$5,220 (약 731만원)</b></td></tr>
+  <tr><th style="width:16%">비목</th><th style="width:36%">항목</th><th style="width:24%">월</th><th>연</th></tr>
+  <tr><td rowspan="3">사업비</td><td>Vercel Pro (웹 서비스 호스팅)</td><td>$20 (약 2.8만원)</td><td>$240 (약 34만원)</td></tr>
+  <tr><td>Supabase Pro (데이터베이스 · 로그인)</td><td>$25 (약 3.5만원)</td><td>$300 (약 42만원)</td></tr>
+  <tr><td><b>소계</b></td><td><b>$45 (약 6.3만원)</b></td><td><b>$540 (약 76만원)</b></td></tr>
+  <tr><td>관리운영비</td><td>Claude Code Max 5x (개발 · 유지보수)</td><td>$100 (약 14만원)</td><td>$1,200 (약 168만원)</td></tr>
+  <tr><td colspan="2"><b>합계</b></td><td><b>$145 (약 20.3만원)</b></td><td><b>$1,740 (약 244만원)</b></td></tr>
 </table>
 <div class="note">Cloudflare R2 · Sentry · 메일 발송은 무료 범위 안에서 운영하며, R2 용량 초과 등 추가 비용은 연 1만원 미만으로 예상됩니다. 모두 달러 결제이므로 환율 · 해외 결제 수수료 변동에 대비해 편성액에 5~10% 여유를 두는 것을 권합니다. 비목 명칭은 기관 회계 기준에 맞게 조정합니다.</div>
 
