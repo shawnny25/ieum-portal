@@ -1213,9 +1213,9 @@ function OrgConsult({ db, reload, say, log, me }) {
   // 담당 전문가가 가능하다고 한 일시만
   const slots = open && myExpert ? expandSlots(T).filter((x) => db.expertAvail.some((a) => a.type === type && a.expertId === me.expertId && sameSlot(a, x))) : [];
   // 같은 전문가를 공유하는 다른 기관이 1순위로 골랐거나 이미 확정된 일시 = 선점
-  const sameExpertOrgs = db.orgs.filter((o) => o.id !== me.id && o.expertId && o.expertId === me.expertId).map((o) => o.id);
+  // (기관은 다른 기관 정보를 못 읽는다. 타 기관 avail 은 RLS org_sel_shared 가 같은 전문가 기관 것만 내려준다)
   const taken = (x) => db.confirms.some((c) => c.type === type && c.orgId !== me.id && c.expertId === me.expertId && sameSlot(c, x))
-    || db.avail.some((a) => a.type === type && a.rank === 1 && sameExpertOrgs.includes(a.orgId) && sameSlot(a, x));
+    || db.avail.some((a) => a.type === type && a.rank === 1 && a.orgId !== me.id && sameSlot(a, x));
   const cf = db.confirms.find((c) => c.orgId === me.id && c.type === type);
   const savedPre = db.pre[me.id]?.[type];                      // 회차별로 따로 저장
   const pre = savedPre || { rate: "", progress: "", country: "", ask: "" };

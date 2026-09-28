@@ -368,3 +368,16 @@ alter function public.guard_cols() set search_path = public;
 -- 자기 기관에 배정된 전문가 한 명만 읽게 허용 (my_role·my_expert 는 security definer 라 재귀 없음).
 create policy org_expert on profiles for select to authenticated
   using (my_role() = 'org' and id = my_expert());
+-- ───────── S1: 기관 정보(담당자 개인정보·예산) 타 기관 노출 차단 (2026-09-28) ─────────
+-- 기존 all_read(using true) 로 모든 로그인 사용자가 전 기관의 담당자 성명·이메일·예산을 읽을 수 있었다.
+-- 관리자 = 전체(adm), 기관 = 자기 기관만(이용 종료 기관도 차단 안내 화면을 위해 읽기 허용), 전문가 = 배정·확정 일정 기관만.
+create or replace function org_expert(oid int) returns uuid language sql stable security definer set search_path = public as
+  $$ select expert_id from orgs where id = oid $$;
+drop policy if exists all_read on orgs;
+create policy org_sel on orgs for select to authenticated using (my_role() = 'org' and my_org() = id);
+create policy exp_sel on orgs for select to authenticated using (is_expert() and (expert_id = auth.uid()
+  or exists (select 1 from confirms c where c.org_id = orgs.id and c.expert_id = auth.uid())));
+-- 선점 표시용 타 기관 희망 순위: orgs 를 직접 조회하면 위 정책에 막히므로 definer 함수로 담당 전문가만 확인
+drop policy if exists org_sel_shared on avail;
+create policy org_sel_shared on avail for select to authenticated
+  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null and org_expert(avail.org_id) = my_expert());
