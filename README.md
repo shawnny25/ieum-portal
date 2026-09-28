@@ -42,13 +42,12 @@ Next.js + Supabase. 관리자 / 기관 / 전문가 3종 화면.
 node --env-file=.env.local scripts/e2e-check.mjs
 ```
 
-### 컨설팅 일정 흐름 변경 (2026-09-16, 미배포)
+### DB 구조를 바꿀 때
 
-전문가 가능 일시를 먼저 조사하고 그중에서 기관에 열 일시를 고르는 2단계 흐름. 반영 순서:
-1. Supabase SQL Editor 에서 `supabase/schema.sql` 맨 아래 "전문가 컨설팅 가능 일시" 블록만 실행 (`expert_avail` 테이블 + 전문가의 confirms 수정 권한 제거)
-2. `git pull` 후 push → Vercel 자동 배포
-3. 관리자 → 컨설팅 일정 → "1단계 · 전문가 가능 일시" 카드에서 기관에 열 일시 체크 → "기관 접수 시작"
-   (기존 회차는 호환을 위해 "기관 접수 중" 상태로 시작한다. 전문가 조사부터 다시 하려면 "접수 닫기")
+`supabase/schema.sql` 은 빈 프로젝트에 한 번에 실행하는 **현재 최종 상태**의 설치 스크립트다 (2026-09-28 정리, 새 DB 에 적용해 운영과 정의가 100% 같음을 확인).
+1. 운영 DB 에는 바꿀 부분만 SQL Editor 에서 실행 (`alter table …`, `create policy …` 등)
+2. `schema.sql` 도 같은 최종 상태가 되도록 해당 부분을 고친다 (이력을 뒤에 덧붙이지 말 것)
+3. `node --env-file=.env.local scripts/e2e-check.mjs` 로 권한 검증
 
 ## 다른 기기에서 이어서 작업하기
 

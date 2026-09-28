@@ -1,4 +1,6 @@
--- 이음 포털 스키마. Supabase SQL Editor 에 붙여넣고 실행.
+-- 이음 포털 스키마 — 빈 Supabase 프로젝트에 한 번에 실행하는 설치 스크립트 (현재 운영 DB 의 최종 상태).
+-- 실행: Supabase → SQL Editor 에 전체를 붙여넣고 Run. 이미 테이블이 있는 DB 에는 실행하지 말 것.
+-- 운영 DB 를 바꿀 때는 변경 SQL 을 운영에 실행하고, 이 파일도 같은 최종 상태로 고쳐 둔다 (변경 이력은 git 기록).
 
 -- ───────── 테이블 ─────────
 create table orgs (
@@ -7,7 +9,9 @@ create table orgs (
   picked int not null,                      -- 선발연도 (이용 3년: picked ~ picked+2)
   manager_name text not null default '',
   manager_title text not null default '',
-  manager_email text not null default ''
+  manager_email text not null default '',
+  budget_total bigint not null default 0,   -- 3개년 사업예산 총액
+  budget_year bigint not null default 0     -- 당해년도 사업예산 총액
 );
 
 create table profiles (
@@ -19,26 +23,33 @@ create table profiles (
   email text not null default ''
 );
 
+-- 기관별 담당 전문가 (profiles 가 orgs 를 참조하므로 뒤에 추가)
+alter table orgs add column expert_id uuid references profiles on delete set null;
+
 create table submissions (
-  org_id int primary key references orgs on delete cascade,
+  org_id int references orgs on delete cascade,
+  kind text not null default 'mid',          -- 보고서 종류 (settings.reports[].key)
   status text not null default 'none' check (status in ('none','submitted','reviewing','revision','approved')),
-  due_fix date
+  due_fix date,
+  primary key (org_id, kind)
 );
 
 create table versions (
   id bigserial primary key,
   org_id int not null references orgs on delete cascade,
+  kind text not null default 'mid',
   no int not null,
   at timestamptz not null default now(),
   note text not null default '',
   files jsonb not null default '[]',        -- [{n, s, path}]
   final boolean not null default false,
-  unique (org_id, no)
+  unique (org_id, kind, no)
 );
 
 create table feedbacks (
   id bigserial primary key,
   org_id int not null references orgs on delete cascade,
+  kind text not null default 'mid',
   v int not null,
   at timestamptz not null default now(),
   author text not null,
@@ -47,36 +58,46 @@ create table feedbacks (
   reply text
 );
 
+-- 기관이 고른 컨설팅 희망 일시 (rank = 희망 순위 1,2,3…)
 create table avail (
   org_id int references orgs on delete cascade,
   type text not null,
   date date not null,
-  primary key (org_id, type, date)
+  time text not null default '',
+  rank int,
+  primary key (org_id, type, date, time)
 );
 
+-- 확정된 컨설팅 일정
 create table confirms (
   org_id int references orgs on delete cascade,
   type text not null,
   date date not null,
+  time text not null default '',
   zoom text not null default '',
   mailed_at timestamptz,
   mail_failed boolean not null default false,
+  expert_id uuid references profiles on delete set null,
   primary key (org_id, type)
 );
 
+-- 컨설팅 회차별 사전 정보
 create table pre (
-  org_id int primary key references orgs on delete cascade,
+  org_id int references orgs on delete cascade,
+  type text not null default 'h2',
   rate text not null default '',
   progress text not null default '',
   country text not null default '',
   ask text not null default '',
-  at timestamptz not null default now()
+  at timestamptz not null default now(),
+  primary key (org_id, type)
 );
 
 create table budgets (
   id bigserial primary key,
   org_id int not null references orgs on delete cascade,
   round int, date text, doc_no text, level text, item text,
+  item_to text not null default '',          -- 항목 전환 시 전환 대상 항목
   before_basis text, before_amt bigint, after_basis text, after_amt bigint,
   reason text, new_item boolean default false, cross_item boolean default false, plan boolean default false
 );
@@ -89,6 +110,7 @@ create table docs (
   at timestamptz not null default now(),
   status text not null default 'pending' check (status in ('pending','approved')),
   reason text not null default '',
+  amount bigint not null default 0,          -- 변경 금액 (외부 승인분)
   approved_by text, approved_at timestamptz, memo text
 );
 
@@ -124,13 +146,55 @@ create table roadmap (
   cat text not null default 'etc'
 );
 
+-- 사업 설정 (관리자 화면에서 편집, 한 행 jsonb)
+create table settings (
+  id int primary key default 1 check (id = 1),
+  data jsonb not null default '{}',
+  updated_at timestamptz not null default now()
+);
+
+-- 흐름: 관리자가 회차별 후보 일시 등록 → 전문가가 가능 일시 체크(expert_avail)
+--       → 관리자가 기관별 담당 전문가 배정(orgs.expert_id) → 기관이 담당 전문가 가능 일시 중 희망 순위 선택(avail)
+--       → 관리자 확정(confirms)
+create table expert_avail (
+  expert_id uuid not null references profiles on delete cascade,
+  type text not null,
+  date date not null,
+  time text not null default '',
+  primary key (expert_id, type, date, time)
+);
+
+-- 전문가가 후보 일시 외에 주관식으로 적는 추가 가능 시간
+create table expert_notes (
+  expert_id uuid not null references profiles on delete cascade,
+  type text not null,
+  note text not null default '',
+  at timestamptz not null default now(),
+  primary key (expert_id, type)
+);
+
+-- 선택컨설팅 신청서
+create table consult_apps (
+  org_id int references orgs on delete cascade,
+  type text not null,
+  data jsonb not null default '{}',
+  expert_pref text not null default '',
+  at timestamptz not null default now(),
+  primary key (org_id, type)
+);
+
 -- ───────── 권한 헬퍼 ─────────
+-- security definer 함수는 RLS 를 거치지 않고 읽는다 → 정책 안에서 써도 재귀가 생기지 않는다.
 create function my_role() returns text language sql stable security definer set search_path = public as
   $$ select role from profiles where id = auth.uid() $$;
 create function my_org() returns int language sql stable security definer set search_path = public as
   $$ select org_id from profiles where id = auth.uid() $$;
 create function org_active(oid int) returns boolean language sql stable security definer set search_path = public as
   $$ select extract(year from now()) <= picked + 2 from orgs where id = oid $$;
+create function my_expert() returns uuid language sql stable security definer set search_path = public as
+  $$ select expert_id from orgs where id = my_org() $$;
+create function org_expert(oid int) returns uuid language sql stable security definer set search_path = public as
+  $$ select expert_id from orgs where id = oid $$;
 create function is_admin() returns boolean language sql stable as $$ select my_role() = 'admin' $$;
 create function is_expert() returns boolean language sql stable as $$ select my_role() = 'expert' $$;
 -- 기관 본인 + 이용기간 내 (3년 경과 차단은 여기서 서버 측 강제)
@@ -152,54 +216,81 @@ alter table reports enable row level security;
 alter table alerts enable row level security;
 alter table logs enable row level security;
 alter table roadmap enable row level security;
+alter table settings enable row level security;
+alter table expert_avail enable row level security;
+alter table expert_notes enable row level security;
+alter table consult_apps enable row level security;
 
 -- 관리자: 전부
-create policy adm on orgs        for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on profiles    for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on submissions for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on versions    for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on feedbacks   for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on avail       for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on confirms    for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on pre         for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on budgets     for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on docs        for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on reports     for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on alerts      for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on logs        for all to authenticated using (is_admin()) with check (is_admin());
-create policy adm on roadmap     for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on orgs         for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on profiles     for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on submissions  for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on versions     for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on feedbacks    for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on avail        for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on confirms     for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on pre          for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on budgets      for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on docs         for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on reports      for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on alerts       for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on logs         for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on roadmap      for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on settings     for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on expert_avail for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on expert_notes for all to authenticated using (is_admin()) with check (is_admin());
+create policy adm on consult_apps for all to authenticated using (is_admin()) with check (is_admin());
 
--- 모두 읽기
-create policy all_read on orgs    for select to authenticated using (true);
-create policy all_read on roadmap for select to authenticated using (true);
+-- 공통
+create policy all_read on roadmap  for select to authenticated using (true);
+create policy all_read on settings for select to authenticated using (true);
 create policy own_read on profiles for select to authenticated using (id = auth.uid());
-create policy all_ins  on logs    for insert to authenticated with check (true);   -- 삭제·수정 정책 없음 = 불변
+create policy all_ins  on logs     for insert to authenticated with check (true);   -- 삭제·수정 정책 없음 = 불변
 
--- 기관
-create policy org_upd on orgs for update to authenticated using (is_my_org(id)) with check (is_my_org(id));
-create policy org_rw on submissions for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id) and status = 'submitted');
-create policy org_sel on versions  for select to authenticated using (is_my_org(org_id));
-create policy org_ins on versions  for insert to authenticated with check (is_my_org(org_id));
-create policy org_sel on feedbacks for select to authenticated using (is_my_org(org_id));
-create policy org_upd on feedbacks for update to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
-create policy org_rw  on avail     for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
-create policy org_sel on confirms  for select to authenticated using (is_my_org(org_id));
-create policy org_rw  on pre       for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
-create policy org_rw  on budgets   for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
-create policy org_sel on docs      for select to authenticated using (is_my_org(org_id));
-create policy org_ins on docs      for insert to authenticated with check (is_my_org(org_id) and status = 'pending');
-create policy org_sel on alerts    for select to authenticated using (is_my_org(org_id));
-create policy org_upd on alerts    for update to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+-- 기관 (orgs 는 자기 기관만 — 이용 종료 기관도 차단 안내 화면을 위해 읽기 허용)
+create policy org_sel on orgs         for select to authenticated using (my_role() = 'org' and my_org() = id);
+create policy org_upd on orgs         for update to authenticated using (is_my_org(id)) with check (is_my_org(id));
+create policy org_expert on profiles  for select to authenticated using (my_role() = 'org' and id = my_expert());  -- 담당 전문가 한 명만
+create policy org_rw  on submissions  for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id) and status = 'submitted');
+create policy org_sel on versions     for select to authenticated using (is_my_org(org_id));
+create policy org_ins on versions     for insert to authenticated with check (is_my_org(org_id));
+create policy org_sel on feedbacks    for select to authenticated using (is_my_org(org_id));
+create policy org_upd on feedbacks    for update to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+create policy org_rw  on avail        for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+create policy org_sel on confirms     for select to authenticated using (is_my_org(org_id));
+create policy org_rw  on pre          for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+create policy org_rw  on budgets      for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+create policy org_sel on docs         for select to authenticated using (is_my_org(org_id));
+create policy org_ins on docs         for insert to authenticated with check (is_my_org(org_id) and status = 'pending');
+create policy org_sel on alerts       for select to authenticated using (is_my_org(org_id));
+create policy org_upd on alerts       for update to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+create policy org_rw  on consult_apps for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
+create policy org_sel on expert_avail for select to authenticated
+  using (my_role() = 'org' and org_active(my_org()) and expert_id = my_expert());
+-- 같은 담당 전문가를 공유하는 다른 기관의 희망 순위·확정 일정 (선점 표시용). orgs 는 못 읽으므로 org_expert() 로 확인.
+create policy org_sel_shared on avail for select to authenticated
+  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null and org_expert(avail.org_id) = my_expert());
+create policy org_sel_shared on confirms for select to authenticated
+  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null and expert_id = my_expert());
 
--- 전문가
-create policy exp_sel on confirms for select to authenticated using (is_expert());
-create policy exp_upd on confirms for update to authenticated using (is_expert()) with check (is_expert());
-create policy exp_sel on pre      for select to authenticated using (is_expert());
-create policy exp_sel on reports  for select to authenticated using (is_expert() and expert_id = auth.uid());
-create policy exp_ins on reports  for insert to authenticated with check (is_expert() and expert_id = auth.uid());
+-- 전문가 (배정되었거나 확정 일정이 있는 기관만)
+create policy exp_sel on orgs for select to authenticated using (is_expert() and (expert_id = auth.uid()
+  or exists (select 1 from confirms c where c.org_id = orgs.id and c.expert_id = auth.uid())));
+create policy exp_sel on confirms for select to authenticated using (is_expert() and expert_id = auth.uid());
+create policy exp_sel on pre for select to authenticated
+  using (is_expert() and exists (select 1 from confirms c where c.org_id = pre.org_id and c.expert_id = auth.uid()));
+create policy exp_sel on consult_apps for select to authenticated using (is_expert() and exists (
+  select 1 from confirms c where c.org_id = consult_apps.org_id and c.type = consult_apps.type and c.expert_id = auth.uid()));
+create policy exp_sel on reports for select to authenticated using (is_expert() and expert_id = auth.uid());
+create policy exp_ins on reports for insert to authenticated with check (is_expert() and expert_id = auth.uid());
+create policy exp_rw on expert_avail for all to authenticated
+  using (is_expert() and expert_id = auth.uid()) with check (is_expert() and expert_id = auth.uid());
+create policy exp_rw on expert_notes for all to authenticated
+  using (is_expert() and expert_id = auth.uid()) with check (is_expert() and expert_id = auth.uid());
 
--- 열 단위 제한: 기관은 feedbacks.reply 만, 전문가는 confirms.zoom 만 수정 가능
--- search_path 고정: 계정 삭제(auth 스키마에서 실행) 연쇄로 이 트리거가 돌 때 my_role() 을 못 찾아 삭제가 실패했다
+-- ───────── 열 단위 제한 트리거 ─────────
+-- 기관은 feedbacks.reply 와 orgs 담당자 정보만, 전문가는 confirms.zoom 만 수정 가능.
+-- search_path 고정: 계정 삭제(auth 스키마에서 실행) 연쇄로 이 트리거가 돌 때 my_role() 을 찾을 수 있어야 한다.
 create function guard_cols() returns trigger language plpgsql set search_path = public as $$
 begin
   if tg_table_name = 'feedbacks' and my_role() = 'org' then
@@ -216,8 +307,8 @@ create trigger guard before update on feedbacks for each row execute function gu
 create trigger guard before update on confirms  for each row execute function guard_cols();
 create trigger guard before update on orgs      for each row execute function guard_cols();
 
--- ───────── 스토리지 ─────────
-insert into storage.buckets (id, name, public) values ('files', 'files', false);
+-- ───────── 스토리지 (R2 미설정 시 폴백 저장소. DB 백업용 backups 버킷은 크론이 만든다) ─────────
+insert into storage.buckets (id, name, public) values ('files', 'files', false) on conflict (id) do nothing;
 -- 경로 규칙: org-{orgId}/... , expert-{uuid}/...
 create policy adm on storage.objects for all to authenticated
   using (bucket_id = 'files' and is_admin()) with check (bucket_id = 'files' and is_admin());
@@ -228,7 +319,9 @@ create policy exp_rw on storage.objects for all to authenticated
   using (bucket_id = 'files' and (storage.foldername(name))[1] = 'expert-' || auth.uid())
   with check (bucket_id = 'files' and (storage.foldername(name))[1] = 'expert-' || auth.uid());
 
--- ───────── 기본 연간 일정 ─────────
+-- ───────── 초기 데이터 ─────────
+insert into settings (id) values (1);
+
 insert into roadmap (year, m, "when", title, cat) values
  (1,1,'1월 3주차','사업 오리엔테이션','etc'),(1,1,'1월 4주차 – 2월 1주차','안전지침 컨설팅','consult'),
  (1,3,'3월 4주차','상반기 필수컨설팅','consult'),(1,4,'4월 2주차','선택컨설팅 신청','consult'),
@@ -246,138 +339,3 @@ insert into roadmap (year, m, "when", title, cat) values
  (3,6,'6월 3주차','종료 대비 정산 점검','report'),(3,9,'9월 18일','중간보고서 제출 마감','deadline'),
  (3,9,'9월 21 – 25일','하반기 필수컨설팅','consult'),(3,10,'10월 3주차','최종 현장점검','monitor'),
  (3,11,'11월 4주차','사업 종료보고 및 정산 심사','report'),(3,12,'12월 2주차','연말 결과공유회 · 성과 공유','etc');
-
--- ───────── 사업 설정 (관리자 화면에서 편집, 한 행 jsonb) ─────────
-create table settings (
-  id int primary key default 1 check (id = 1),
-  data jsonb not null default '{}',
-  updated_at timestamptz not null default now()
-);
-alter table settings enable row level security;
-create policy adm on settings for all to authenticated using (is_admin()) with check (is_admin());
-create policy all_read on settings for select to authenticated using (true);
-insert into settings (id) values (1);
-
--- ───────── 보고서 종류 (2026-09-14 추가) ─────────
--- 신규 설치용: 위 create table 의 submissions / versions / feedbacks 에 kind 열이 필요하다.
-alter table submissions drop constraint submissions_pkey;
-alter table submissions add column kind text not null default 'mid';
-alter table submissions add primary key (org_id, kind);
-alter table versions add column kind text not null default 'mid';
-alter table versions drop constraint versions_org_id_no_key;
-alter table versions add unique (org_id, kind, no);
-alter table feedbacks add column kind text not null default 'mid';
-n-- ───────── 컨설팅 시간 슬롯 (2026-09-14 추가) ─────────
-alter table avail drop constraint avail_pkey;
-alter table avail add column time text not null default '';
-alter table avail add primary key (org_id, type, date, time);
-alter table confirms add column time text not null default '';
-
--- ───────── 전문가 컨설팅 가능 일시 (2026-09-16 추가) ─────────
--- 흐름: 관리자가 회차별 후보 일시 등록 → 전문가가 가능 일시 체크(expert_avail)
---       → 관리자가 전문가 가능 일시 중 기관에 열 일시를 골라 '기관 접수 시작'(settings.consult_types[].stage='org', org_slots)
---       → 기관이 그 일시 중에서 체크(avail) → 관리자 확정(confirms)
-create table expert_avail (
-  expert_id uuid not null references profiles on delete cascade,
-  type text not null,
-  date date not null,
-  time text not null default '',
-  primary key (expert_id, type, date, time)
-);
-alter table expert_avail enable row level security;
-create policy adm on expert_avail for all to authenticated using (is_admin()) with check (is_admin());
-create policy exp_rw on expert_avail for all to authenticated
-  using (is_expert() and expert_id = auth.uid()) with check (is_expert() and expert_id = auth.uid());
--- 확정 일정은 관리자만 변경: 전문가의 confirms 수정(zoom 비고) 권한 제거
-drop policy if exists exp_upd on confirms;
-
--- ───────── 확정 일정 담당 전문가 (2026-09-16 추가) ─────────
-alter table confirms add column expert_id uuid references profiles on delete set null;
-
--- ───────── 전문가는 본인 배정 일정·담당 기관 사전 정보만 조회 (2026-09-16 추가) ─────────
-drop policy if exists exp_sel on confirms;
-create policy exp_sel on confirms for select to authenticated using (is_expert() and expert_id = auth.uid());
-drop policy if exists exp_sel on pre;
-create policy exp_sel on pre for select to authenticated
-  using (is_expert() and exists (select 1 from confirms c where c.org_id = pre.org_id and c.expert_id = auth.uid()));
-
--- ───────── 기관 희망 순위 (2026-09-16 추가): 체크한 순서를 1,2,3… 으로 저장 ─────────
-alter table avail add column rank int;
-
--- ───────── 컨설팅 일정 수립 8단계 흐름 (2026-09-16 추가) ─────────
--- 기관별 담당 전문가. 기관은 담당 전문가의 가능 일시만 보고 1·2·3순위를 고른다.
-alter table orgs add column expert_id uuid references profiles on delete set null;
--- 전문가가 후보 일시 외에 주관식으로 적는 추가 가능 시간
-create table expert_notes (
-  expert_id uuid not null references profiles on delete cascade,
-  type text not null,
-  note text not null default '',
-  at timestamptz not null default now(),
-  primary key (expert_id, type)
-);
-alter table expert_notes enable row level security;
-create policy adm on expert_notes for all to authenticated using (is_admin()) with check (is_admin());
-create policy exp_rw on expert_notes for all to authenticated
-  using (is_expert() and expert_id = auth.uid()) with check (is_expert() and expert_id = auth.uid());
--- 기관: 담당 전문가의 가능 일시 조회
-create function my_expert() returns uuid language sql stable security definer set search_path = public as
-  $$ select expert_id from orgs where id = my_org() $$;
-create policy org_sel on expert_avail for select to authenticated
-  using (my_role() = 'org' and org_active(my_org()) and expert_id = my_expert());
--- 기관: 같은 담당 전문가를 공유하는 다른 기관의 희망 순위·확정 일정 조회 (선점 표시용)
-create policy org_sel_shared on avail for select to authenticated
-  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null
-         and (select expert_id from orgs where id = avail.org_id) = my_expert());
-create policy org_sel_shared on confirms for select to authenticated
-  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null and expert_id = my_expert());
-
--- ───────── 사업예산 총액·항목 전환·외부 변경금액 (2026-09-22 추가) ─────────
-alter table orgs add column if not exists budget_total bigint not null default 0;
-alter table orgs add column if not exists budget_year bigint not null default 0;
-alter table budgets add column if not exists item_to text not null default '';
-alter table docs add column if not exists amount bigint not null default 0;
-
--- ───────── 사전 정보 회차별 분리 · 선택컨설팅 신청서 (2026-09-22 추가) ─────────
--- 사전 정보를 컨설팅 회차별로 분리 (기존 행은 하반기 h2 로)
-alter table pre drop constraint pre_pkey;
-alter table pre add column if not exists type text not null default 'h2';
-alter table pre add primary key (org_id, type);
-
--- 선택컨설팅 신청서
-create table if not exists consult_apps (
-  org_id int references orgs on delete cascade,
-  type text not null,
-  data jsonb not null default '{}',
-  expert_pref text not null default '',
-  at timestamptz not null default now(),
-  primary key (org_id, type)
-);
-alter table consult_apps enable row level security;
-create policy adm on consult_apps for all to authenticated using (is_admin()) with check (is_admin());
-create policy org_rw on consult_apps for all to authenticated using (is_my_org(org_id)) with check (is_my_org(org_id));
-create policy exp_sel on consult_apps for select to authenticated using (is_expert() and exists (
-  select 1 from confirms c where c.org_id = consult_apps.org_id and c.type = consult_apps.type and c.expert_id = auth.uid()));
-
--- ───────── 계정 삭제 실패 수정 (2026-09-23) ─────────
--- 담당 전문가로 컨설팅 일정에 연결된 계정을 지우면 confirms.expert_id 가 null 로 바뀌며 guard 트리거가 도는데,
--- 인증 서버의 search_path(auth) 에서 my_role() 을 못 찾아 "Database error deleting user" 가 났다.
-alter function public.guard_cols() set search_path = public;
-
--- ───────── 기관이 담당 전문가 프로필을 못 읽던 문제 (2026-09-23) ─────────
--- profiles 는 본인 행만 읽을 수 있어 기관 화면에서 담당 전문가를 찾지 못했고, 전문가 가능 일시가 하나도 표시되지 않았다.
--- 자기 기관에 배정된 전문가 한 명만 읽게 허용 (my_role·my_expert 는 security definer 라 재귀 없음).
-create policy org_expert on profiles for select to authenticated
-  using (my_role() = 'org' and id = my_expert());
--- ───────── S1: 기관 정보(담당자 개인정보·예산) 타 기관 노출 차단 (2026-09-28) ─────────
--- 기존 all_read(using true) 로 모든 로그인 사용자가 전 기관의 담당자 성명·이메일·예산을 읽을 수 있었다.
--- 관리자 = 전체(adm), 기관 = 자기 기관만(이용 종료 기관도 차단 안내 화면을 위해 읽기 허용), 전문가 = 배정·확정 일정 기관만.
-create or replace function org_expert(oid int) returns uuid language sql stable security definer set search_path = public as
-  $$ select expert_id from orgs where id = oid $$;
-drop policy if exists all_read on orgs;
-create policy org_sel on orgs for select to authenticated using (my_role() = 'org' and my_org() = id);
-create policy exp_sel on orgs for select to authenticated using (is_expert() and (expert_id = auth.uid()
-  or exists (select 1 from confirms c where c.org_id = orgs.id and c.expert_id = auth.uid())));
--- 선점 표시용 타 기관 희망 순위: orgs 를 직접 조회하면 위 정책에 막히므로 definer 함수로 담당 전문가만 확인
-drop policy if exists org_sel_shared on avail;
-create policy org_sel_shared on avail for select to authenticated
-  using (my_role() = 'org' and org_active(my_org()) and my_expert() is not null and org_expert(avail.org_id) = my_expert());

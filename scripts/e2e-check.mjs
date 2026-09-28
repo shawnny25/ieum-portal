@@ -35,6 +35,8 @@ try {
   // 3. 읽기 격리
   const { data: v } = await org.from("versions").select("*");
   assert.equal(v.length, 0); ok("다른 기관 제출본 안 보임");
+  const { data: os } = await org.from("orgs").select("id");
+  assert.deepEqual(os.map((o) => o.id), [mine.id]); ok("기관 정보는 자기 기관만 (담당자 개인정보 격리)");
   const { data: pr } = await org.from("profiles").select("*");
   assert.equal(pr.length, 1); ok("프로필은 본인 것만");
   const { data: rm } = await org.from("roadmap").select("id");
